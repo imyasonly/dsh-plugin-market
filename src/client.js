@@ -37,6 +37,8 @@ window.__ModuleLoader__.load({
  */
 const EN = {
   '百通插件广场': 'Baitong Plugin Plaza',
+  '已是最新版本': 'Up to date',
+  '有新版本 {v}': 'New version {v} available',
   '插件': 'Plugins',
   '技能': 'Skills',
   '全部': 'All',
@@ -222,6 +224,49 @@ function Logo({ url, name, fallback = 'P' }) {
   );
 }
 
+/**
+ * 面板头部的版本徽标：`v当前版本` + 喇叭图标；线上有更新时喇叭亮起（琥珀色 + 红点 + 文案）。
+ *
+ * 数据由宿主提供（前端既读不到包内文件，也不该直连 npm）：`pluginMeta` 返回
+ * `{ current, latest, hasUpdate, error }`。宿主侧有一次外网请求（registry，带缓存），
+ * **失败只是不亮提醒**（error 字段），不能影响面板本身。
+ */
+function VersionBadge() {
+  const tr = useTr();
+  const [meta, setMeta] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    api('pluginMeta').then(([err, data]) => {
+      if (alive && !err && data && data.current) setMeta(data);
+    });
+    return () => { alive = false; };
+  }, []);
+  if (!meta) return null;
+  const tip = meta.hasUpdate ? tr('有新版本 {v}', { v: meta.latest }) : tr('已是最新版本');
+  return (
+    <span className={'btm-ver' + (meta.hasUpdate ? ' is-update' : '')} title={tip}>
+      <span className="btm-ver-text">{`v${meta.current}`}</span>
+      <span className="btm-bell" role="img" aria-label={tip}>
+        <svg
+          viewBox="0 0 16 16"
+          width="13"
+          height="13"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.4"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M3.9 6.7a4.1 4.1 0 0 1 8.2 0v2.8l1.1 1.9H2.8l1.1-1.9z" />
+          <path d="M6.6 13.1a1.4 1.4 0 0 0 2.8 0" />
+        </svg>
+        {meta.hasUpdate ? <i className="btm-bell-dot" /> : null}
+      </span>
+      {meta.hasUpdate ? <span className="btm-ver-hint">{tr('有新版本 {v}', { v: meta.latest })}</span> : null}
+    </span>
+  );
+}
+
 function categoryLabel(key, categories) {
   if (!key) return '未分类';
   const hit = (categories || []).find((c) => c.key === key);
@@ -400,6 +445,13 @@ const CSS = `
 .btm-top-title{font-size:14px;font-weight:600;color:var(--dsw-alias-label-primary,#17191c)}
 .btm-close{margin-left:auto;width:32px;height:32px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2,#d1d5db);background:var(--dsw-alias-bg-layer-3,#fff);color:var(--dsw-alias-label-secondary,#4b5563);font:inherit;font-size:18px;line-height:1;cursor:pointer}
 .btm-close:hover{background:var(--dsw-alias-interactive-bg-hover,#f3f4f6)}
+.btm-ver{display:inline-flex;align-items:center;gap:5px;font-size:11px;line-height:1;color:var(--dsw-alias-label-secondary,#6b7280);border:1px solid var(--dsw-alias-border-l2,#e5e7eb);border-radius:999px;padding:3px 8px;background:var(--dsw-alias-bg-layer-3,#f9fafb);cursor:default}
+.btm-ver.is-update{color:#b45309;border-color:#fcd34d;background:#fef3c7}
+.btm-ver-text{font-variant-numeric:tabular-nums}
+.btm-bell{position:relative;display:inline-flex;align-items:center}
+.btm-bell svg{display:block}
+.btm-bell-dot{position:absolute;top:-2px;right:-2px;width:5px;height:5px;border-radius:50%;background:#ef4444}
+.btm-ver-hint{font-weight:600}
 .btm-body{flex:1;min-height:0;overflow:auto;padding:18px 20px 32px}
 .btm-scope{display:block;margin-bottom:10px}
 .btm-seg{display:inline-flex;align-items:center;gap:2px;padding:2px;border:1px solid var(--dsw-alias-border-l2,#e2e4e8);border-radius:9px;background:var(--dsw-alias-bg-layer-1,#f5f6f8)}
@@ -2234,6 +2286,7 @@ function PlazaPage({ onClose, box, ctx }) {
         <div className="btm-tabs" role="tablist">
           <span className="btm-top-title">{lookup('百通插件广场')}</span>
         </div>
+        <VersionBadge />
         <button type="button" className="btm-close" onClick={onClose} aria-label="关闭" title="关闭">
           ×
         </button>

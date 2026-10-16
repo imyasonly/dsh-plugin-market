@@ -18,7 +18,7 @@
 - [数据与网络](#数据与网络)
 - [故障排查](#故障排查)
 - [安全](#安全)
-- [本地开发](#本地开发)
+- [开发](#开发)
 - [许可证](#许可证)
 
 ---
@@ -28,6 +28,7 @@
 **侧栏「百通插件广场」面板**
 
 - 插件 / 技能双分类页，全部 / 已安装切换、类目筛选、排序
+- 面板头部显示**当前插件版本号**与通知喇叭图标；当前版本低于线上版本时点亮红点并提示可更新到的版本
 - 插件卡片：详情直达 GitHub、一键安装、实时进度（准备中 → 下载 → 完成）
 - 已安装视图：本机只读预览已安装插件与技能（来源 spec、版本、体积、更新时间），可卸载
 
@@ -45,6 +46,8 @@
 **其他**
 
 - 安装完成后可**一键重启 DSH**（桌面端走应用级重启，web 端走进程重启）
+- 图标支持站内相对路径（如 `/baitong_ai/static/skill-icons/icon-02.png`）与 https 外链，
+  统一经本机图标代理加载（离线/内网不裂图）；加载失败降级为首字色块
 - 界面跟随 Harness 的中英文语言设置
 
 ---
@@ -55,6 +58,11 @@
 - Node.js ≥ 22（由 DSH 提供）
 
 `@deepseek-ai/cordis`、`@deepseek-ai/dsh-tools`、`react` 等均由 DSH 提供，**无需自行安装**。
+
+这些依赖在 `peerDependencies` 里写成**发布轨道范围**（`@deepseek-ai/dsh-tools` 是
+`^0.1.1-rc.2 || ^0.2.0-rc.1`），而不是钉死单个版本 —— DSH 在装包前会把该范围与
+**正在运行的 DSH 版本**做匹配（`semver.satisfies(runtime, range, { includePrerelease: true })`），
+不匹配就在跑 pnpm 之前直接拒装。所以 DSH 跨到新的 0.x 线时，本插件需要跟着补一版范围。
 
 ---
 
@@ -79,7 +87,7 @@ dsh plugin --profile desktop add @baitongserver/dsh-plugin-market
 
 - ⚠️ **必须带 `@baitongserver/` scope**。npm 上无前缀名的 `dsh-plugin-market` 是**另一个项目**（`veloce-ailab`），不是本插件。
 - `dsh web` 请绑定 `127.0.0.1`，不要监听 `0.0.0.0`。
-- 本地开发安装见[本地开发](#本地开发)。
+- 从源码本地安装（`link:` 方式），以及构建 / 自检 / 发布流程，见 [开发](#开发)。
 
 **npm 与 `github:` 两种源都支持**
 
@@ -177,10 +185,12 @@ curl -X POST http://127.0.0.1:<port>/baitong-market -d '{"method":"pluginInstall
 | 插件安装计划 | `GET {apiBase}/api/bt/dsh/plugins/{owner}/{name}/install-plan` |
 | 技能搜索 / 详情 | `GET {apiBase}/api/v1/search`、`/api/v1/skills/{slug}` |
 | 技能安装包 | `GET {apiBase}/api/v1/download?slug=`（302 → COS 预签名） |
+| 版本自检 | `GET registry.npmjs.org` / `registry.npmmirror.com` 的 `@baitongserver/dsh-plugin-market/latest`（成功缓存 1h，失败 5min） |
 | 本机面板 | `/baitong-market`（安装进度轮询、图标代理、同源重启） |
 
 - 上游请求有超时（默认 20s），超时与网络失败会给出可读的错误原因
 - 网络走**使用者自己的系统配置**，插件不内置任何代理
+- 版本自检**只读且不阻塞**：查不到线上版本时徽标只显示当前版本，不报错、不影响任何功能
 - 自定义 `apiBase` 应只指向你信任的服务
 
 ---
@@ -210,91 +220,9 @@ curl -X POST http://127.0.0.1:<port>/baitong-market -d '{"method":"pluginInstall
 
 ---
 
-## 本地开发
+## 开发
 
-```sh
-pnpm install
-pnpm typecheck   # tsc --noEmit
-pnpm build       # tsc + esbuild 编译 client.js → lib/
-dsh plugin --profile web add <本仓库绝对路径>
-```
-
-带本仓库配置层启动（联调用）：
-
-```sh
-dsh web --patch ./cordis.patch.local.yml
-```
-
-只 dump 不启动即可验证 patch 是否命中：
-
-```sh
-dsh --profile desktop --dump-config | grep -A4 baitong
-# 命中后输出带 "# == @baitongserver/dsh-plugin-market, patched by <patch 文件>" 注释行
-```
-
-### 自检套件
-
-改动后跑一遍，全绿共 **263 项**：
-
-```sh
-node logs/_verify/verify-all.mjs            # 一次跑完下面 5 套，并核对本文档里的项数是否与实际一致
-node logs/_verify/publish-check.mjs          # 84 项 发包前置 + 产物形态 + 隐私 + 文档红线 + 包名/主体/仓库一致性
-node logs/_verify/install-ux-check.mjs       # 35 项 进度条展示时机 + 收尾守卫
-node logs/_verify/install-fallback-check.mjs # 39 项 网络失败可读化 + 降级分支
-node logs/_verify/restart-check.mjs          # 45 项 重启三条路径（真跑）
-node logs/_verify/card-check.mjs             # 60 项 卡片结构 + 图标兜底 + 空态居中 + 概述富文本净化
-```
-
-### 发布
-
-```sh
-pnpm build                            # prepublishOnly 也会自动跑，先跑一次能提前暴露编译错
-node logs/_verify/publish-check.mjs   # 发包前置自检
-npm pack --dry-run                    # 人工确认白名单内容
-npm publish --registry https://registry.npmjs.org/
-```
-
-发包要点：
-
-- **scoped 包必须 `access: public`**。`@baitongserver/*` 默认按 `restricted` 处理，
-  `npm publish` 会被 registry 拒；已固定在 `package.json` 的 `publishConfig.access`。
-- 本机默认 registry 是 npmmirror，发布要显式 `--registry`。
-- `lib/` 已在 `.gitignore`（构建产物），但发包走 `files` 白名单，与 `.gitignore` 无关；
-  `prepublishOnly` 会在发布时重新构建，**不依赖仓库里的 lib**。
-- `files` 白名单只有 4 项：`lib/`、`cordis.patch.yml`、`README.md`、`LICENSE`。
-  本机私有化配置 `cordis.patch.local.yml` 不在其中，不会随包泄漏。
-
-### 目录
-
-| 文件 | 作用 |
-| --- | --- |
-| `src/host.ts` | Cordis 入口：工具注册、systemPrompt、settings、webServer |
-| `src/plugin-market.ts` | 百通插件 API + install-plan 校验链 + 冲突预检 |
-| `src/skill-market.ts` | 百通技能 API（CLI 兼容接口）+ zip 安装/卸载 + lockfile |
-| `src/dsh-cli.ts` | spawn `dsh plugin add` + pnpm ndjson 进度 + allowBuilds 重试 |
-| `src/ndjson.ts` | pnpm ndjson 进度解析 |
-| `src/unzip.ts` | zip 解压（中央目录定位，zip-slip 防护） |
-| `src/restart.ts` | 一键重启 DSH（桌面端 Electron / web 进程） |
-| `src/local-api.ts` | 本机 `/baitong-market` HTTP |
-| `src/config-store.ts` | 默认值、覆盖链与 `baitong-market.json` overlay |
-| `src/client.js` | 广场面板 UI（React/JSX，**由 esbuild 编译**，见下） |
-
-### 客户端构建约定
-
-DSH 浏览器侧通过 `window.__ModuleLoader__.load({ id, factory })` 加载插件面板，
-React 由 factory 的 `require('react')` 从客户端模块表注入。因此：
-
-- **不能**写裸 ESM `import 'react'` —— 服务端会试图解析 node_modules，报
-  `client-modules: could not load ... via __ModuleLoader.__load`
-- **不能**用 `createRoot` 手动挂载 —— DSH 没有 `#xxx-root` 这类 DOM 容器，
-  面板必须通过 `slots.inject('sidebar.footer.action', …)` 注册
-- JSX 必须编译（浏览器不解析）：`scripts/build-client.mjs` 用 esbuild
-  classic runtime（`React.createElement`）转译，`bundle: false` 保留 `require()`
-- `react-dom` 也在客户端模块表内（`require('react-dom')`），无需进 package.json 依赖
-- 面板样式用 `ctx.effect(() => ensureCss(), 'baitong-market-style')` 注入，跟随
-  DSH 主题变量 `--dsw-alias-*`
-
-改完 `src/client.js` 必须 `pnpm build`（`link:` 安装下只重启不重新编译不会生效）。
+构建、自检与发布流程见 [DEVELOPMENT.md](./DEVELOPMENT.md)。
 
 ---
 

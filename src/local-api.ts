@@ -3,7 +3,8 @@
  * method 分发：按 method 分派到各端点；新增技能面板所需端点。
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { fetchBytes, proxyEnvSnapshot } from './http.js';
+import { readFileSync } from 'node:fs';
+import { fetchBytes, fetchJson, proxyEnvSnapshot } from './http.js';
 import { getBaitongSkillDetail, installBaitongSkill, installedSlugs, listInstalledSkills, readSkillLockEntry, searchBaitongSkills, uninstallBaitongSkill } from './skill-market.js';
 import { PatchProbeUnavailableError, fetchInstallPlan, findPatchIdConflict, installBaitongPlugin, isPluginInstallBusy, listPluginCategories, listPlugins, parsePluginRef, readInstalledPluginMeta, readProfileDependencies, readProfileDependenciesOf, readInstalledPluginReadme, resolveInstallSource, uninstallBaitongPlugin, withPluginInstallLock } from './plugin-market.js';
 import { BOOT_ID, currentProfile, progress, publicInstallStatus } from './dsh-cli.js';
@@ -294,9 +295,157 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, cfg: 
       return sendJson(res, 200, { ok: true, ...publicConfig(cfg) });
     }
 
+    // ===== 版本自检（面板头部版本号 + 更新提醒） =====
+    if (method === 'pluginMeta') {
+      return sendJson(res, 200, { ok: true, ...(await pluginVersionSnapshot(cfg)) });
+    }
+
     sendJson(res, 400, { ok: false, error: 'unknown method' });
   } catch (err) {
     sendJson(res, 500, { ok: false, error: err instanceof Error ? err.message : String(err) });
+  }
+}
+
+/* ==================== 版本自检：面板头部的版本号 + 更新提醒 ==================== */
+
+/** 本插件自己的版本号：读包内 package.json（`lib/` 就在包根下一层，link 与 npm 安装都成立） */
+const PKG_URL = new URL('../package.json', import.meta.url);
+/** 本插件自己就是 npm 包，所以"线上最新版"直接问 registry；主源 + 镜像兜底，先成功者为准 */
+const VERSION_SOURCES = [
+  'https://registry.npmjs.org/@baitongserver/dsh-plugin-market/latest',
+  'https://registry.npmmirror.com/@baitongserver/dsh-plugin-market/latest',
+];
+
+/**
+ * 版本比较（只服务本插件自己的版本号，形如 `0.1.6` 或 `0.2.0-rc.1`）。
+ *
+ * 为什么不引 semver：本包保持**零 dependencies**（宿主提供 peer，不额外装东西），
+ * 而这里只需要"谁新"这一个判断。规则照 semver：数字段逐位比；都相同则无预发布标识的一方更新；
+ * 预发布段里数字标识 < 字母标识，纯数字段按数值比（避免 `rc.10 < rc.9` 这种字典序错误）。
+ *
+ * @returns >0 表示 a 更新，<0 表示 b 更新，0 表示相等
+ */
+export function compareVersions(a: string, b: string): number {
+  const split = (v: string) => {
+    const [core = '', pre = ''] = String(v || '').trim().replace(/^v/i, '').split('-', 2);
+    return { core: core.split('.').map((n) => Number.parseInt(n, 10) || 0), pre: pre ? pre.split('.') : [] };
+  };
+  const x = split(a);
+  const y = split(b);
+  for (let i = 0; i < Math.max(x.core.length, y.core.length); i += 1) {
+    const d = (x.core[i] || 0) - (y.core[i] || 0);
+    if (d !== 0) return d > 0 ? 1 : -1;
+  }
+  if (x.pre.length === 0 && y.pre.length === 0) return 0;
+  if (x.pre.length === 0) return 1;
+  if (y.pre.length === 0) return -1;
+  for (let i = 0; i < Math.max(x.pre.length, y.pre.length); i += 1) {
+    const p = x.pre[i];
+    const q = y.pre[i];
+    if (p === undefined) return -1;
+    if (q === undefined) return 1;
+    if (p === q) continue;
+    const pn = /^\d+$/.test(p);
+    const qn = /^\d+$/.test(q);
+    if (pn && qn) return Number(p) > Number(q) ? 1 : -1;
+    if (pn) return -1;
+    if (qn) return 1;
+    return p > q ? 1 : -1;
+  }
+  return 0;
+}
+
+/** 本插件版本号；读不到（异常/裁剪过的包）返回空串，前端据此不渲染徽标 */
+export function currentPluginVersion(): string {
+  try {
+    const pkg = JSON.parse(readFileSync(PKG_URL, 'utf8')) as { version?: unknown };
+    return typeof pkg.version === 'string' ? pkg.version : '';
+  } catch {
+    return '';
+  }
+}
+
+export interface VersionSnapshot {
+  current: string;
+  latest: string;
+  hasUpdate: boolean;
+  source: string;
+  checkedAt: number;
+  error: string | null;
+}
+
+let versionCache: { at: number; value: VersionSnapshot } | null = null;
+/** 命中缓存省一次外网请求；失败只缓存 5 分钟，别把一次网络抖动记成一小时 */
+const VERSION_TTL_OK = 60 * 60 * 1000;
+const VERSION_TTL_FAIL = 5 * 60 * 1000;
+
+/**
+ * 面板头部用：当前版本 + 线上 latest + 是否有更新。
+ * 🔴 网络失败**不影响面板**：返回 `error` 字段，前端只是不亮喇叭（不报错、不阻塞）。
+ */
+export async function pluginVersionSnapshot(cfg: BaitongConfig): Promise<VersionSnapshot> {
+  const now = Date.now();
+  if (versionCache) {
+    const ttl = versionCache.value.error ? VERSION_TTL_FAIL : VERSION_TTL_OK;
+    if (now - versionCache.at < ttl) return versionCache.value;
+  }
+  const current = currentPluginVersion();
+  for (const url of VERSION_SOURCES) {
+    try {
+      const json = await fetchJson<{ version?: unknown }>(url, {
+        timeoutMs: Math.min(cfg.timeoutMs, 8000),
+        userAgent: cfg.userAgent,
+      });
+      const latest = typeof json?.version === 'string' ? json.version : '';
+      if (!latest) continue;
+      const value: VersionSnapshot = {
+        current,
+        latest,
+        // 只有"线上确实更新"才亮提醒；本地比线上新（自测/预发布）不该提示
+        hasUpdate: !!current && compareVersions(latest, current) > 0,
+        source: new URL(url).host,
+        checkedAt: now,
+        error: null,
+      };
+      versionCache = { at: now, value };
+      return value;
+    } catch {
+      /* 换下一个源 */
+    }
+  }
+  const value: VersionSnapshot = { current, latest: '', hasUpdate: false, source: '', checkedAt: now, error: '版本检查失败' };
+  versionCache = { at: now, value };
+  return value;
+}
+
+/**
+ * 图标地址归一化 —— 后端 logo 字段实测有两种形态（2026-10-16 生产数据，技能 100 条）：
+ *   - 28 条 `https://btai-….cos.ap-beijing.myqcloud.com/…`（COS 外链，直接用）
+ *   - 72 条 `/baitong_ai/static/skill-icons/icon-02.png`（**站内绝对路径，压根不是 http 开头**）
+ * 第二种按 apiBase 补全后是可达的（实测 `https://s.1100111.cn/baitong_ai/static/skill-icons/icon-02.png`
+ * → 200 + image/png 21KB），早期实现一律 `400 bad url` 会让**大多数**技能图标退化成首字，
+ * 所以这里补全成绝对地址再交给代理。
+ *
+ * 🔴 姿态不变：仍然**只代理 https**（非 https 一律返回 null ⇒ 400 ⇒ 前端首字兜底）。
+ * 这条是安全选择而非能力限制 —— 私有化部署若把 apiBase 配成 `http://`，图标会退化到首字，
+ * 需要放开的话要连同这里一起改，别只改调用点。
+ *
+ * @param raw 后端原始 logo/avatarUrl 值，可能是空串、外链、站内绝对路径或相对路径
+ * @param apiBase 当前生效的 API 根地址（含自建/私有化覆盖）
+ * @returns 可代理的绝对 https 地址；无法归一化时 null
+ */
+export function resolveIconTarget(raw: string, apiBase: string): string | null {
+  const value = String(raw || '').trim();
+  if (!value) return null;
+  if (/^https:\/\//i.test(value)) return value;
+  // 自带 scheme 的非 https（http: / data: / file: / javascript: …）一律拒绝
+  if (/^[a-z][a-z0-9+.-]*:/i.test(value)) return null;
+  try {
+    const base = `${String(apiBase || '').replace(/\/+$/, '')}/`;
+    const resolved = new URL(value, base);
+    return resolved.protocol === 'https:' ? resolved.href : null;
+  } catch {
+    return null;
   }
 }
 
@@ -304,8 +453,8 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, cfg: 
 export async function handleIcon(req: IncomingMessage, res: ServerResponse, cfg: BaitongConfig): Promise<void> {
   try {
     const url = new URL(req.url || '/', 'http://127.0.0.1');
-    const target = url.searchParams.get('url') || '';
-    if (!/^https:\/\//i.test(target)) {
+    const target = resolveIconTarget(url.searchParams.get('url') || '', cfg.apiBase);
+    if (target === null) {
       res.statusCode = 400;
       res.end('bad url');
       return;
