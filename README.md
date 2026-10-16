@@ -5,6 +5,9 @@
 - 兼容 DSH **web 与桌面端（GUI）**，装完即用
 - 支持私有化部署，改配置即可，无需重新编译（见[配置](#配置)）
 
+源码：[github.com/imyasonly/dsh-plugin-market](https://github.com/imyasonly/dsh-plugin-market) ·
+遇到问题请提 [issue](https://github.com/imyasonly/dsh-plugin-market/issues)
+
 ## 目录
 
 - [功能](#功能)
@@ -231,15 +234,15 @@ dsh --profile desktop --dump-config | grep -A4 baitong
 
 ### 自检套件
 
-改动后跑一遍，全绿共 **236 项**：
+改动后跑一遍，全绿共 **263 项**：
 
 ```sh
 node logs/_verify/verify-all.mjs            # 一次跑完下面 5 套，并核对本文档里的项数是否与实际一致
-node logs/_verify/publish-check.mjs          # 76 项 发包前置 + 产物形态 + 隐私 + 文档红线 + 包名/主体一致性
+node logs/_verify/publish-check.mjs          # 84 项 发包前置 + 产物形态 + 隐私 + 文档红线 + 包名/主体/仓库一致性
 node logs/_verify/install-ux-check.mjs       # 35 项 进度条展示时机 + 收尾守卫
 node logs/_verify/install-fallback-check.mjs # 39 项 网络失败可读化 + 降级分支
 node logs/_verify/restart-check.mjs          # 45 项 重启三条路径（真跑）
-node logs/_verify/card-check.mjs             # 41 项 卡片结构
+node logs/_verify/card-check.mjs             # 60 项 卡片结构 + 图标兜底 + 空态居中 + 概述富文本净化
 ```
 
 ### 发布

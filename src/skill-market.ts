@@ -6,7 +6,7 @@
  *   GET {apiBase}/api/v1/download?slug=                下载（302 → COS 预签名 zip）
  * 安装：zip 下载 → 解压（拒绝路径穿越）→ 必须含 SKILL.md → 落 skillsDir → 写 lockfile。
  */
-import { createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { pipeline } from 'node:stream/promises';
@@ -197,7 +197,8 @@ function copyDirSync(src: string, dest: string): void {
     const to = join(dest, name);
     if (statSync(from).isDirectory()) copyDirSync(from, to);
     else {
-      const { copyFileSync } = require('node:fs') as typeof import('node:fs');
+      // 🔴 必须静态 import（同 unzip.ts）：ESM 产物里没有 `require` 全局，
+      // 裸 require 抛 ReferenceError ⇒ 技能安装失败。
       copyFileSync(from, to);
     }
   }

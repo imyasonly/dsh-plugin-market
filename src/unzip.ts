@@ -3,7 +3,8 @@
  * 用中央目录（End of Central Directory）定位条目，支持 data descriptor；
  * 🔴 路径穿越防护：拒绝绝对路径与 `..` 上跳（zip-slip 攻击），拒绝盘符与设备名。
  */
-import { createWriteStream, mkdirSync } from 'node:fs';
+import { createWriteStream, mkdirSync, readFileSync } from 'node:fs';
+import { inflateRaw as inflateRawCallback } from 'node:zlib';
 import { dirname, join, resolve } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
@@ -55,8 +56,10 @@ function readEntries(buf: Buffer): ZipEntry[] {
 
 function inflateRaw(data: Buffer, uncompressedSize: number): Promise<Buffer> {
   return new Promise((resolvePromise, reject) => {
-    const zlib = require('node:zlib') as typeof import('node:zlib');
-    zlib.inflateRaw(data, (err, out) => {
+    // 🔴 必须静态 import：产物是 ESM（package.json type=module），
+    // ESM 里没有 `require` 这个全局，裸require 会抛
+    // `ReferenceError: require is not defined`，技能安装直接失败。
+    inflateRawCallback(data, (err, out) => {
       if (err) reject(err);
       else resolvePromise(out.subarray(0, Math.max(0, uncompressedSize)));
     });
@@ -65,7 +68,6 @@ function inflateRaw(data: Buffer, uncompressedSize: number): Promise<Buffer> {
 
 /** 解压到目标目录；返回写入的相对路径列表（目录条目不写入文件） */
 export async function unzipToDir(zipPath: string, destDir: string): Promise<string[]> {
-  const { readFileSync } = require('node:fs') as typeof import('node:fs');
   const buf = readFileSync(zipPath);
   const entries = readEntries(buf);
   const written: string[] = [];

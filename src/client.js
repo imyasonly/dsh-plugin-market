@@ -191,6 +191,37 @@ function iconUrl(url) {
   return `/baitong-market/icon?url=${encodeURIComponent(url)}`;
 }
 
+/**
+ * 🔴 图标加载失败必须兜底成「首字 + 蓝底」，不能露出浏览器那张破图标识。
+ *
+ * 事故（2026-10-16）：图标 URL 存在但加载失败（404 / 网络不可达 / 代理超时）时，
+ * `<img>` 会渲染成浏览器自带的"图片损坏"图标 —— 界面上就是一个破图符号，
+ * 比没有图标更难看。
+ *
+ * 为什么用 state 而不是 `onError` 直接换渲染：
+ *   - `onError` 里 setState 需要 hooks，函数组件内可行，但本组件要复用于4 处卡片，
+ *     每处各写一遍 state 必然漏改 ⇒ 抽成本组件统一收口。
+ *   - 加载失败是**终态**，一旦失败不再重试，避免反复请求同一个坏 URL。
+ *   - 首字取「显示名优先」：插件卡片上方标题就是 displayName，取它的首字才不割裂。
+ */
+function Logo({ url, name, fallback = 'P' }) {
+  const [failed, setFailed] = useState(false);
+  // url 变化（换数据/筛选）时重置，允许新 URL 再试一次
+  useEffect(() => { setFailed(false); }, [url]);
+  const initial = String(name || fallback).trim().slice(0, 1).toUpperCase();
+  if (!url || failed) {
+    return <span className="btm-logo-fallback">{initial}</span>;
+  }
+  return (
+    <img
+      src={iconUrl(url)}
+      alt={String(name || '')}
+      loading="lazy"
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
 function categoryLabel(key, categories) {
   if (!key) return '未分类';
   const hit = (categories || []).find((c) => c.key === key);
@@ -230,11 +261,7 @@ function PluginCard({ plugin, categories, installing, onInstall }) {
     <div className={'btm-card' + (installed ? ' is-installed' : '')}>
       <div className="btm-card-head">
         <div className="btm-card-logo">
-          {plugin.avatarUrl ? (
-            <img src={iconUrl(plugin.avatarUrl)} alt={plugin.name} loading="lazy" />
-          ) : (
-            <span className="btm-logo-fallback">{(plugin.displayName || plugin.name || 'P').slice(0, 1)}</span>
-          )}
+          <Logo url={plugin.avatarUrl} name={plugin.displayName || plugin.name} fallback="P" />
         </div>
         <div className="btm-card-title">
           <div className="btm-card-name">{plugin.displayName || plugin.name}</div>
@@ -285,11 +312,7 @@ function SkillCard({ skill, onInstall, onDetail, installedSlugsSet = new Set() }
     <div className={'btm-card' + (installed ? ' is-installed' : '')}>
       <div className="btm-card-head">
         <div className="btm-card-logo">
-          {skill.logo ? (
-            <img src={iconUrl(skill.logo)} alt={skill.name} loading="lazy" />
-          ) : (
-            <span className="btm-logo-fallback">{(skill.name || skill.slug || 'S').slice(0, 1)}</span>
-          )}
+          <Logo url={skill.logo} name={skill.name || skill.slug} fallback="S" />
         </div>
         <div className="btm-card-title">
           <div className="btm-card-name">{skill.name}</div>
@@ -405,7 +428,8 @@ const CSS = `
 .btm-card-head{display:flex;gap:10px;align-items:center;min-width:0;flex:none}
 .btm-card-logo{width:36px;height:36px;flex:none;overflow:hidden;border-radius:9px;background:linear-gradient(135deg,#c7d2fe,#fbcfe8);border:1px solid var(--dsw-alias-border-l2,#e5e7eb)}
 .btm-card-logo img{width:100%;height:100%;display:block;object-fit:cover}
-.btm-logo-fallback{display:flex;align-items:center;justify-content:center;width:100%;height:100%;font-size:14px;font-weight:700;color:#374151}
+/* 图标缺失/加载失败时的兜底：蓝底白字首字，明确传达"这是个占位"而不是坏图 */
+.btm-logo-fallback{display:flex;align-items:center;justify-content:center;width:100%;height:100%;font-size:14px;font-weight:700;color:#fff;background:#3b82f6;text-transform:uppercase}
 .btm-card-title{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1 1 auto;overflow:hidden}
 .btm-card-name{font-size:14px;font-weight:600;line-height:20px;color:var(--dsw-alias-label-primary,inherit);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .btm-card-fullname{font-size:11px;line-height:16px;flex:none;color:var(--dsw-alias-label-tertiary,#7b8088);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -500,7 +524,10 @@ const CSS = `
 .btm-tv-progress{display:flex;flex-direction:column;gap:4px;flex:none;margin-top:8px}
 .btm-tv-done{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 11px;border-radius:10px;font-size:12px;background:var(--dsw-alias-state-success-tertiary,#ecfdf5);color:var(--dsw-alias-state-success-primary,#047857)}
 .btm-tv-simple{flex-direction:row;align-items:center;gap:8px;font-size:12px;color:var(--dsw-alias-label-secondary,#4b5058)}
-.btm-empty{padding:20px 0;text-align:center;font-size:12px;color:var(--dsw-alias-label-caption,#6b7280)}
+/* 🔴 空态要真正居中：.btm-grid 是 display:grid，空态作为 grid item 会被塞进
+   单元格里，text-align:center 只管文字、不管盒子位置 ⇒ 文字靠左。
+   正确做法是让它跨满整行（grid-column:1/-1）再自身文字居中。 */
+.btm-empty{grid-column:1/-1;padding:40px 0;text-align:center;font-size:12px;color:var(--dsw-alias-label-caption,#6b7280)}
 .btm-loading,.btm-error{padding:12px 0;text-align:center;font-size:12px;color:var(--dsw-alias-label-caption,#6b7280)}
 .btm-error{color:var(--dsw-alias-state-danger-primary,#b91c1c)}
 .btm-banner{display:flex;align-items:center;gap:8px;padding:8px 10px;margin-bottom:8px;border-radius:10px;font-size:12px;background:var(--dsw-alias-state-success-tertiary,#ecfdf5);color:var(--dsw-alias-state-success-primary,#047857)}
@@ -603,6 +630,141 @@ function markdownInline(text) {
  * 只覆盖 README 常见语法（标题/列表/代码块/引用/分割线/表格/行内标记），
  * 先整体转义再生成标签，杜绝 README 里的 HTML 注入。
  */
+/**
+ * 🔴 概述字段可能是 **HTML**（后端富文本里全是 `<p><img src=...></p>`），
+ * 也可能是 Markdown。原来统一走 escapeHtml + Markdown 渲染，
+ * 于是 HTML 标签被转义成 `&lt;p&gt;...` 纯文本 —— **图片当然不显示**。
+ *
+ * 安全权衡：内容来自后端接口，直接 `dangerouslySetInnerHTML` 放行任意 HTML
+ * 等于把 XSS 面交给上游。所以走**白名单净化**：
+ *   - 放行：img / p / br / 基础排版（b i em strong u s code pre h1-h6 ul ol li blockquote hr table系 a）
+ *   - 剥掉：script / style / iframe / object / embed / form 等可执行或可导航元素
+ *   - 剥掉：所有 on* 事件属性、style 里的表达式（url(javascript:)…）、
+ *     以及 href/src 里的 javascript: 协议
+ *   - 图片强制走本机图标代理，否则 COS 直连在离线/内网环境必然裂图
+ */
+const HTML_TAG_RE = /<\/?[a-zA-Z][^>]*>/;
+const ALLOWED_HTML_TAGS = new Set([
+  'a', 'b', 'blockquote', 'br', 'code', 'dd', 'del', 'div', 'dl', 'dt', 'em',
+  'figcaption', 'figure', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr', 'i', 'img',
+  'li', 'ol', 'p', 'pre', 's', 'span', 'strong', 'sub', 'sup', 'table', 'tbody',
+  'td', 'th', 'thead', 'tr', 'u', 'ul',
+]);
+/**
+ * 可执行 / 可导航 / 可嵌入外部文档的元素，一律整段丢弃（含内容）。
+ *
+ * 🔴 写法陷阱（实测踩过）：用 `<\/\1\s*>` 匹配闭合标签是**错的** ——
+ * `<script>x</script>` 里的 `</` 之后紧跟 `script`，能匹配上；但正则的
+ * `[\s\S]*?` 惰性 + 可选的闭合分支（`>）`）会在遇到**内容里的第一个 `>`** 就提前收尾，
+ * 于是 `<script>alert(2)</script>` 只删掉了 `<script>`，**内容 `alert(2)` 泄漏成裸文本**
+ * （同理 `<script>if(a<b){...}</script>` 会从 `a<b` 处开始泄漏）。
+ *
+ * 正解：闭合标签写成 `<\/script` 这类**字面量**形式逐标签匹配，
+ * 并且把"未闭合"作为兜底（`[\\s\\S]*$` 吞到结尾），宁可多删不可漏删。
+ */
+const DANGEROUS_BLOCKS = [
+  /<script\b[\s\S]*?(?:<\/script\s*>|$)/gi,
+  /<style\b[\s\S]*?(?:<\/style\s*>|$)/gi,
+  /<iframe\b[\s\S]*?(?:<\/iframe\s*>|$)/gi,
+  /<object\b[\s\S]*?(?:<\/object\s*>|$)/gi,
+  /<embed\b[\s\S]*?(?:<\/embed\s*>|$)/gi,
+  /<form\b[\s\S]*?(?:<\/form\s*>|$)/gi,
+  /<link\b[^>]*>/gi,
+  /<meta\b[^>]*>/gi,
+  /<base\b[^>]*>/gi,
+];
+
+/** 属性值转义（白名单净化在"已剔除危险标签"的前提下使用） */
+function escapeAttr(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+/** 危险 URL 协议：javascript: / vbscript: / data:（data: 只放行图片） */
+function safeUrl(raw, allowDataImage) {
+  const url = String(raw || '').trim();
+  if (/^\s*(javascript|vbscript|file)\s*:/i.test(url)) return '';
+  if (/^\s*data\s*:/i.test(url)) return allowDataImage && /^data:image\//i.test(url) ? url : '';
+  return url;
+}
+
+/** 白名单净化 HTML：只留展示性标签与安全属性，其余标签改为文本、危险元素整段删除。 */
+function sanitizeHtml(raw) {
+  const src = String(raw || '');
+  // ① 先整段删除危险元素及其内容（必须在标签处理之前，否则会留下碎片）
+  const withoutBlocks = DANGEROUS_BLOCKS.reduce((acc, re) => acc.replace(re, ''), src);
+  // ② 逐个标签处理。
+  //    🔴 顺序陷阱：不能「先拼标签、最后统一 escapeHtml」—— 那样会把刚生成的
+  //    合法标签一起转义掉（实测 `<img src=...>` → `&lt;img...&gt;`，图片又不显示了）。
+  //    正确做法是**先把标签抠出来替换成占位符，剩余文本转义，再把标签放回去**。
+  const slots = [];
+  const withSlots = withoutBlocks.replace(
+    /<\/?([a-zA-Z][a-zA-Z0-9-]*)((?:[^>"']|"[^"]*"|'[^']*')*)>/g,
+    (match, tagRaw, attrRaw) => {
+      const tag = tagRaw.toLowerCase();
+      if (!ALLOWED_HTML_TAGS.has(tag)) return ''; // 不在白名单 → 抹掉标签本身
+      // 🔴 闭合标签也必须走占位符，不能直接返回 `</p>` ——
+      //    直接返回的话，第③步的 escapeHtml 会把它转义成 `&lt;/p&gt;`，
+      //    产出就是"标签开了没关"（实测踩过）。
+      if (match.startsWith('</')) {
+        slots.push(`</${tag}>`);
+        return `\u0000${slots.length - 1}\u0000`;
+      }
+      const attrs = [];
+      const attrRe = /([a-zA-Z_:][-a-zA-Z0-9_:.]*)\s*=\s*("[^"]*"|'[^']*'|[^\s"'>]+)/g;
+      let m;
+      while ((m = attrRe.exec(attrRaw)) !== null) {
+        const name = m[1].toLowerCase();
+        const value = m[2].replace(/^["']|["']$/g, '');
+        if (name.startsWith('on')) continue;             // 事件处理器一律剥掉
+        if (tag === 'img') {
+          if (name === 'src') {
+            const url = safeUrl(value, true);
+            // 走本机图标代理：离线/内网环境下 COS 直连必然裂图
+            if (!url) return '';
+            attrs.push(`src="${escapeAttr(iconUrl(url))}"`);
+          } else if (name === 'alt') attrs.push(`alt="${escapeAttr(value)}"`);
+          else if (name === 'width' || name === 'height') {
+            const n = Number(value);
+            if (Number.isFinite(n) && n > 0 && n <= 4096) attrs.push(`${name}="${Math.floor(n)}"`);
+          }
+          continue;
+        }
+        if (name === 'href') {
+          const url = safeUrl(value, false);
+          if (!url) continue;
+          attrs.push(`href="${escapeAttr(url)}"`, 'target="_blank"', 'rel="noreferrer noopener"');
+          continue;
+        }
+        // 其余只放行 title / colspan / rowspan / start 这类展示性属性
+        if (['title', 'colspan', 'rowspan', 'start'].includes(name)) {
+          attrs.push(`${name}="${escapeAttr(value)}"`);
+        }
+      }
+      slots.push(`<${tag}${attrs.length ? ' ' + attrs.join(' ') : ''}>`);
+      return `\u0000${slots.length - 1}\u0000`;
+    },
+  );
+  // ③ 转义剩余文本（标签已抠成占位符，不会被误伤）
+  const escaped = withSlots.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  // ④ 放回标签
+  return escaped.replace(/\u0000(\d+)\u0000/g, (_, i) => slots[Number(i)]);
+}
+
+/**
+ * 概述渲染总入口：按内容形态分派。
+ * 后端给HTML（常见于富文本概述，图片就是这么丢的）→ 白名单净化；
+ * 给 Markdown → 原有渲染（先转义再解析，安全模型不变）。
+ */
+function renderRichText(source) {
+  const raw = String(source == null ? '' : source);
+  if (!raw.trim()) return '';
+  return HTML_TAG_RE.test(raw) ? sanitizeHtml(raw) : renderMarkdown(raw);
+}
+
 function renderMarkdown(source) {
   const lines = escapeHtml(source).replace(/\r\n?/g, '\n').split('\n');
   const out = [];
@@ -842,7 +1004,7 @@ function SkillDetailSheet({ slug, fallbackName, onClose }) {
     body = (
       <>
         <h4 className="btm-sheet-h">{tr('概述')}</h4>
-        <div className="btm-md" dangerouslySetInnerHTML={{ __html: renderMarkdown(d.description || d.summary || tr('暂无概述')) }} />
+        <div className="btm-md" dangerouslySetInnerHTML={{ __html: renderRichText(d.description || d.summary || tr('暂无概述')) }} />
 
         <h4 className="btm-sheet-h">{tr('版本信息')}</h4>
         <ul className="btm-kv">
@@ -935,7 +1097,7 @@ function PluginDetail({ item, onClose }) {
   else
     body = (
       <>
-        <div className="btm-md" dangerouslySetInnerHTML={{ __html: renderMarkdown(state.text) }} />
+        <div className="btm-md" dangerouslySetInnerHTML={{ __html: renderRichText(state.text) }} />
         {state.truncated ? <p className="btm-status">{tr('（说明文档超过 64KB，此处仅显示前一部分）')}</p> : null}
       </>
     );
@@ -1695,11 +1857,7 @@ function PluginSearchToolView(props) {
             <div className={'btm-card' + (isDone || p.installed ? ' is-installed' : '')} key={p.fullName}>
               <div className="btm-card-head">
                 <div className="btm-card-logo">
-                  {p.avatarUrl ? (
-                    <img src={iconUrl(p.avatarUrl)} alt={p.name} loading="lazy" />
-                  ) : (
-                    <span className="btm-logo-fallback">{(p.displayName || p.name || 'P').slice(0, 1)}</span>
-                  )}
+                  <Logo url={p.avatarUrl} name={p.displayName || p.name} fallback="P" />
                 </div>
                 <div className="btm-card-title">
                   <div className="btm-card-name">{p.displayName || p.name}</div>
