@@ -297,6 +297,6 @@ React 由 factory 的 `require('react')` 从客户端模块表注入。因此：
 
 ## 许可证
 
-[MIT](./LICENSE) © Tencent Inc.
+[MIT](./LICENSE) © Yansen
 
 「百通」「DeepSeek」「DeepSeek Harness」等名称归其各自所有者，本项目与它们没有从属或背书关系。
