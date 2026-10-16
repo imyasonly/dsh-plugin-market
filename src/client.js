@@ -212,13 +212,43 @@ function iconUrl(url) {
  *   - 加载失败是**终态**，一旦失败不再重试，避免反复请求同一个坏 URL。
  *   - 首字取「显示名优先」：插件卡片上方标题就是 displayName，取它的首字才不割裂。
  */
-function Logo({ url, name, fallback = 'P' }) {
+/**
+ * 插件类卡片的通用图标：蓝底 + 白色拼图块。
+ *
+ * 背景（2026-10-16）：已安装插件清单读的是本机 profile 里的 package.json，
+ * 那里**没有图标字段** —— 图标 URL 只存在于市场目录接口，所以已装卡片永远拿不到 logo；
+ * 市场卡片遇到图标 404 时同样没有图。以前两者都降级成「首字母」，一屏字母既不像图标、
+ * 也看不出条目类型。插件类卡片统一改成拼图图标后，一眼可辨「这是一个插件」。
+ *
+ * 背景色刻意沿用 .btm-logo-fallback（#3b82f6）不变，只把里面的首字换成图标。
+ */
+function PluginGlyph() {
+  return (
+    <span className="btm-logo-fallback btm-logo-glyph" aria-hidden="true">
+      <svg
+        viewBox="0 0 24 24"
+        width="20"
+        height="20"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.9"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="M4 5h5a2.5 2.5 0 0 1 5 0h6v5a2.5 2.5 0 0 0 0 5v6H4z" />
+      </svg>
+    </span>
+  );
+}
+
+function Logo({ url, name, fallback = 'P', glyph = false }) {
   const [failed, setFailed] = useState(false);
   // url 变化（换数据/筛选）时重置，允许新 URL 再试一次
   useEffect(() => { setFailed(false); }, [url]);
   const initial = String(name || fallback).trim().slice(0, 1).toUpperCase();
   if (!url || failed) {
-    return <span className="btm-logo-fallback">{initial}</span>;
+    // 插件（glyph）用统一拼图图标；技能仍用首字，避免和插件混淆
+    return glyph ? <PluginGlyph /> : <span className="btm-logo-fallback">{initial}</span>;
   }
   return (
     <img
@@ -408,7 +438,7 @@ function PluginCard({ plugin, categories, installing, onInstall }) {
     <div className={'btm-card' + (installed ? ' is-installed' : '')}>
       <div className="btm-card-head">
         <div className="btm-card-logo">
-          <Logo url={plugin.avatarUrl} name={plugin.displayName || plugin.name} fallback="P" />
+          <Logo url={plugin.avatarUrl} name={plugin.displayName || plugin.name} fallback="P" glyph />
         </div>
         <div className="btm-card-title">
           <div className="btm-card-name">{plugin.displayName || plugin.name}</div>
@@ -591,6 +621,8 @@ const CSS = `
 .btm-card-logo img{width:100%;height:100%;display:block;object-fit:cover}
 /* 图标缺失/加载失败时的兜底：蓝底白字首字，明确传达"这是个占位"而不是坏图 */
 .btm-logo-fallback{display:flex;align-items:center;justify-content:center;width:100%;height:100%;font-size:14px;font-weight:700;color:#fff;background:#3b82f6;text-transform:uppercase}
+/* 插件类卡片兜底：同一个蓝底，内容换成拼图图标（背景色不变） */
+.btm-logo-glyph svg{display:block}
 .btm-card-title{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1 1 auto;overflow:hidden}
 .btm-card-name{font-size:14px;font-weight:600;line-height:20px;color:var(--dsw-alias-label-primary,inherit);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .btm-card-fullname{font-size:11px;line-height:16px;flex:none;color:var(--dsw-alias-label-tertiary,#7b8088);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -1389,7 +1421,11 @@ function InstalledView({ kind, keyword = '', installStatus, onChanged, onNeedRes
           <div className="btm-card" key={it.key}>
             <div className="btm-card-head">
               <div className="btm-card-logo">
-                <span className="btm-logo-fallback">{String(it.name || '?').slice(0, 1)}</span>
+                {kind === 'skills' ? (
+                  <span className="btm-logo-fallback">{String(it.name || '?').slice(0, 1)}</span>
+                ) : (
+                  <PluginGlyph />
+                )}
               </div>
               <div className="btm-card-title">
                 <span className="btm-card-name">{it.name}</span>
@@ -2018,7 +2054,7 @@ function PluginSearchToolView(props) {
             <div className={'btm-card' + (isDone || p.installed ? ' is-installed' : '')} key={p.fullName}>
               <div className="btm-card-head">
                 <div className="btm-card-logo">
-                  <Logo url={p.avatarUrl} name={p.displayName || p.name} fallback="P" />
+                  <Logo url={p.avatarUrl} name={p.displayName || p.name} fallback="P" glyph />
                 </div>
                 <div className="btm-card-title">
                   <div className="btm-card-name">{p.displayName || p.name}</div>

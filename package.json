@@ -1,6 +1,6 @@
 {
   "name": "@baitongserver/dsh-plugin-market",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "百通插件广场：在 DeepSeek Harness 中浏览、搜索并安装百通插件市场的 DSH 插件与百通技能库技能",
   "author": "Yansen <ysen0820@gmail.com>",
   "type": "module",

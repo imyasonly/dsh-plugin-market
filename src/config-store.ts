@@ -19,9 +19,15 @@ export function dshHome(): string {
 }
 
 /**
- * 默认百通 API 根地址（生产部署，context path = /baitong_ai，公网可达）。
+ * 默认百通 API 根地址（context path = /baitong_ai，公网可达）。
  *
- * 为什么编译进包里而不是只放配置文件：这是**公网可达**的生产服务，零配置即用是
+ * 🔴 当前**临时指向测试环境** `ts.1100111.cn`（0.1.9 起的临时配置）。
+ *    生产地址是 `s.1100111.cn`。切回生产有两种方式：
+ *      - 不改包：设置页 / `BAITONG_API_BASE` / profile 的 `cordis.patch.yml` 任一覆盖即可；
+ *      - 改包：把下面这一行换回 `s.` 后重新发版。
+ *    用户的本地覆盖优先级高于本常量，所以已配置过的用户不受这次切换影响。
+ *
+ * 为什么编译进包里而不是只放配置文件：这是**公网可达**的服务，零配置即用是
  * 装完就能用的前提。真正要防的不是"有默认值"，而是"默认值不可改、不可查"——
  * 所以这里只放默认值，并配齐覆盖链与可观测性：
  *
@@ -34,7 +40,7 @@ export function dshHome(): string {
  * 生效值会经 `pluginInstallStatus` 的 `apiBase` 字段回传，用户报障时可直接确认
  * 实际连的是哪个地址，不必翻配置。私有化部署改设置页或 profile 配置即可，**无需重编包**。
  */
-export const DEFAULT_API_BASE = 'https://s.1100111.cn/baitong_ai';
+export const DEFAULT_API_BASE = 'https://ts.1100111.cn/baitong_ai'; // 临时：测试环境。生产为 https://s.1100111.cn/baitong_ai
 
 /**
  * 规范化根地址：缺协议补 http://（本地 127.0.0.1:5500 也能用）、去尾部斜杠。
