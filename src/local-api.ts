@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 import { fetchBytes, fetchJson, proxyEnvSnapshot } from './http.js';
 import { getBaitongSkillDetail, installBaitongSkill, installedSlugs, listInstalledSkills, readSkillLockEntry, searchBaitongSkills, uninstallBaitongSkill } from './skill-market.js';
 import { PatchProbeUnavailableError, fetchInstallPlan, findPatchIdConflict, installBaitongPlugin, isPluginInstallBusy, listPluginCategories, listPlugins, parsePluginRef, readInstalledPluginMeta, readProfileDependencies, readProfileDependenciesOf, readInstalledPluginReadme, resolveInstallSource, uninstallBaitongPlugin, withPluginInstallLock } from './plugin-market.js';
-import { BOOT_ID, currentProfile, progress, publicInstallStatus } from './dsh-cli.js';
+import { BOOT_ID, addDshPlugin, currentProfile, profileDir, progress, publicInstallStatus, summarizePnpmFailure, writeMinimumReleaseAgeExclude } from './dsh-cli.js';
 import { assignConfig, publicConfig, sanitizePatch, writeOverlay } from './config-store.js';
 import { detectRuntime, isRestartPending, markRestartPending, restartDesktopApp, scheduleRestart, servingPort, trustedRestartRequest } from './restart.js';
 import type { BaitongConfig } from './config-store.js';
@@ -201,6 +201,69 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, cfg: 
       })();
       return sendJson(res, 200, { ok: true, started: true, source, profile, warning });
     }
+    if (method === 'pluginSelfUpgrade') {
+      // 自己升级自己：面板头部"有新版本"气泡点一下就走这里。
+      // 🔴 关键：source 必须带**显式版本号**（`pkg@0.1.7`）。只写包名时 pnpm 会认为
+      // lockfile 里 `^0.1.1` 的解（0.1.1）已经满足 spec，直接复用、不升级 —— 这正是
+      // "装完还是旧版"的根因。
+      const profile = currentProfile();
+      if (isPluginInstallBusy() || progress.active) {
+        return sendJson(res, 409, { ok: false, error: '已有安装任务在进行中', profile });
+      }
+      // link 安装（本地源码开发）不能自我升级：pnpm add 会把它换成注册表版本，
+      // 覆盖掉开发者的 link。这条路径要求"改代码 + 重新构建 + 重启"。
+      let spec = '';
+      try {
+        spec = readProfileDependenciesOf(profile)[SELF_PKG] ?? '';
+      } catch (err) {
+        return sendJson(res, 200, { ok: false, error: err instanceof Error ? err.message : String(err), profile });
+      }
+      if (/^link:/i.test(spec)) {
+        return sendJson(res, 200, {
+          ok: false,
+          error: `${profile} profile 是 link 安装（${spec}），源码即最新版：请重新构建（npm run build）后重启 DSH，不要走自我升级。`,
+          profile,
+          link: true,
+        });
+      }
+
+      // 目标版本必须现拉，不能吃一小时缓存（否则刚发的版本身上的实例看不到）
+      const snap = await pluginVersionSnapshot(cfg, { force: true });
+      if (!snap.latest) {
+        return sendJson(res, 200, { ok: false, error: `获取线上版本失败：${snap.error ?? '未知错误'}`, profile });
+      }
+      if (!SELF_VERSION_RE.test(snap.latest)) {
+        return sendJson(res, 200, { ok: false, error: `线上版本号非法：${snap.latest}`, profile });
+      }
+      if (!snap.current || compareVersions(snap.latest, snap.current) <= 0) {
+        return sendJson(res, 200, { ok: false, alreadyLatest: true, error: `已是最新版本 ${snap.current || snap.latest}`, profile });
+      }
+
+      const source = `${SELF_PKG}@${snap.latest}`;
+      // 自我升级的目标永远是「刚发布」的版本，必然落在 pnpm 供应链冷却期（默认 24h）内。
+      // 提前把该版本写进 profile 的 minimumReleaseAgeExclude，避免第一次点击就失败重试。
+      try {
+        writeMinimumReleaseAgeExclude(profileDir(profile), source);
+      } catch {
+        /* 写不进去就走 addDshPlugin 内部的重试兜底 */
+      }
+      progress.error = null;
+      progress.lastLine = '';
+      void (async () => {
+        try {
+          await withPluginInstallLock(() => addDshPlugin(source, profile));
+          progress.error = null;
+          progress.lastLine = `升级完成：${snap.current} → ${snap.latest}（${profile} profile），重启 DSH 后生效`;
+          // 升级成功后缓存里的 current 还停在旧值，清掉让下次 pluginMeta 重新读
+          versionCache = null;
+        } catch (err) {
+          const text = err instanceof Error ? err.message : String(err);
+          // message 里已由 summarizePnpmFailure 提炼；再兜底一次，绝不把 NDJSON 原文塞进面板
+          if (progress.error === null) progress.error = summarizePnpmFailure(text).slice(0, 800) || text.slice(0, 800);
+        }
+      })();
+      return sendJson(res, 200, { ok: true, started: true, source, profile, from: snap.current, to: snap.latest });
+    }
     if (method === 'pluginReadme') {
       // 已安装插件的 README 只读预览（本地读，不联网）
       const pkg = String(body.pkg ?? url.searchParams.get('pkg') ?? '').trim();
@@ -297,7 +360,8 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, cfg: 
 
     // ===== 版本自检（面板头部版本号 + 更新提醒） =====
     if (method === 'pluginMeta') {
-      return sendJson(res, 200, { ok: true, ...(await pluginVersionSnapshot(cfg)) });
+      // body.check === true（升级完重新拉一次）时绕过缓存，否则升完还显示旧 current
+      return sendJson(res, 200, { ok: true, ...(await pluginVersionSnapshot(cfg, { force: body.check === true })) });
     }
 
     sendJson(res, 400, { ok: false, error: 'unknown method' });
@@ -310,6 +374,10 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, cfg: 
 
 /** 本插件自己的版本号：读包内 package.json（`lib/` 就在包根下一层，link 与 npm 安装都成立） */
 const PKG_URL = new URL('../package.json', import.meta.url);
+/** 自我升级用的包名（必须与 package.json 的 name 一致，readProfileDependenciesOf 按它查 spec） */
+const SELF_PKG = '@baitongserver/dsh-plugin-market';
+/** 拼进 pnpm 目标串的版本号白名单：防 `@1.2.3 && rm -rf` 这类注入（TARGET_RE 也允许 & | 等字符） */
+const SELF_VERSION_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 /** 本插件自己就是 npm 包，所以"线上最新版"直接问 registry；主源 + 镜像兜底，先成功者为准 */
 const VERSION_SOURCES = [
   'https://registry.npmjs.org/@baitongserver/dsh-plugin-market/latest',
@@ -382,10 +450,12 @@ const VERSION_TTL_FAIL = 5 * 60 * 1000;
 /**
  * 面板头部用：当前版本 + 线上 latest + 是否有更新。
  * 🔴 网络失败**不影响面板**：返回 `error` 字段，前端只是不亮喇叭（不报错、不阻塞）。
+ *
+ * @param force 跳过缓存重新拉（点击"升级"前必须拿到**当下**的 latest，不能拿一小时前的缓存当目标版本）
  */
-export async function pluginVersionSnapshot(cfg: BaitongConfig): Promise<VersionSnapshot> {
+export async function pluginVersionSnapshot(cfg: BaitongConfig, opts: { force?: boolean } = {}): Promise<VersionSnapshot> {
   const now = Date.now();
-  if (versionCache) {
+  if (!opts.force && versionCache) {
     const ttl = versionCache.value.error ? VERSION_TTL_FAIL : VERSION_TTL_OK;
     if (now - versionCache.at < ttl) return versionCache.value;
   }

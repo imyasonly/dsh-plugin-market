@@ -5,8 +5,9 @@
  *    超时/取消处理、安装状态快照（面板轮询用）。
  */
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { dshHome } from './config-store.js';
 import { createProgressTracker, type ProgressTracker } from './ndjson.js';
 
@@ -25,15 +26,78 @@ export function isSafeProfile(profile: string): boolean {
 }
 
 /**
- * 探测当前运行 profile（优先级：BAITONG_DSH_PROFILE 环境变量 > 启动参数 --profile
- * > 扫描 ~/.dsh/profiles 下装过本插件的 > web）。
- *
- * 桌面端 GUI 启动不会带 --profile，且本插件是 link 安装（代码路径不含 profiles/<name>），
- * 只能靠「哪个 profile 的 package.json 依赖了本插件」反推。
+ * 本插件自身的包根目录（用于反查"哪个 profile 在跑我"）。
+ * lib/host.js → 上一级即包根；link 安装时会被 Node 解析成源码真实路径。
  */
-export function currentProfile(input: { env?: NodeJS.ProcessEnv; argv?: string[]; home?: string } = {}): string {
+function selfRoot(): string | null {
+  try {
+    return dirname(dirname(fileURLToPath(import.meta.url)));
+  } catch {
+    return null;
+  }
+}
+
+/** 从本插件代码路径里抠出 profiles/<name>/node_modules 中的 <name> */
+function profileFromSelfPath(root: string | null): string | null {
+  if (!root) return null;
+  const parts = root.split(/[\\/]+/);
+  for (let i = parts.length - 2; i >= 0; i--) {
+    if (parts[i] !== 'profiles') continue;
+    const name = parts[i + 1];
+    if (name && isSafeProfile(name)) return name;
+  }
+  return null;
+}
+
+/** 读一个 profile 的 dependencies（坏文件返回 null） */
+function profileDeps(dir: string): Record<string, string> | null {
+  try {
+    const raw = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as {
+      dependencies?: Record<string, string>;
+    };
+    return raw.dependencies ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** 规范化比较用路径（Windows 大小写/分隔符不敏感，且容忍不存在） */
+function normPath(p: string): string {
+  let out = p.replace(/[\\/]+$/, '').replace(/\\/g, '/');
+  try {
+    out = realpathSync.native(p).replace(/\\/g, '/');
+  } catch {
+    /* 路径不存在时用原值 */
+  }
+  return process.platform === 'win32' ? out.toLowerCase() : out;
+}
+
+/** 列出 ~/.dsh/profiles 下的合法 profile 名 */
+function listProfiles(home: string): string[] {
+  try {
+    return readdirSync(join(home, 'profiles')).filter((n) => isSafeProfile(n));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * 探测当前运行 profile。桌面端 GUI 启动不带 --profile，且 web profile 是 link 安装
+ * （代码路径不含 profiles/<name>），所以顺序是：
+ *   1. BAITONG_DSH_PROFILE 环境变量
+ *   2. 启动参数 --profile <name>
+ *   3. 自身代码路径含 profiles/<name>/node_modules（注册表安装：desktop）
+ *   4. 某 profile 用 link:<路径> 依赖本包且真实路径等于自身（link 安装：web）
+ *   5. 某 profile 的 dependencies 里有本包键名（兜底）
+ *   6. 工作目录名本身是 profile 目录
+ *   7. 回退 web
+ */
+export function currentProfile(
+  input: { env?: NodeJS.ProcessEnv; argv?: string[]; home?: string; selfPath?: string; cwd?: string } = {},
+): string {
   const env = input.env ?? process.env;
   const argv = input.argv ?? process.argv;
+  const home = input.home ?? dshHome();
 
   const explicit = env.BAITONG_DSH_PROFILE;
   if (explicit && isSafeProfile(explicit)) return explicit;
@@ -41,24 +105,40 @@ export function currentProfile(input: { env?: NodeJS.ProcessEnv; argv?: string[]
   const i = argv.indexOf('--profile');
   if (i >= 0 && argv[i + 1] && isSafeProfile(String(argv[i + 1]))) return String(argv[i + 1]);
 
-  const profilesDir = join(input.home ?? dshHome(), 'profiles');
-  try {
-    for (const name of readdirSync(profilesDir)) {
-      if (!isSafeProfile(name)) continue;
-      try {
-        const raw = JSON.parse(readFileSync(join(profilesDir, name, 'package.json'), 'utf8')) as {
-          dependencies?: Record<string, unknown>;
-        };
-        // ⚠️ 键必须与 package.json 的 name 完全一致：这里靠它判断"哪个 profile 装了本插件"，
-        // 对不上会静默 fallback 到 web profile，导致装/卸落到错误的 profile
-        if (raw.dependencies && raw.dependencies['@baitongserver/dsh-plugin-market']) return name;
-      } catch {
-        /* 跳过坏 profile */
-      }
+  const root = input.selfPath !== undefined ? input.selfPath : selfRoot();
+  const names = listProfiles(home);
+
+  // 3. 注册表安装：真实路径落在 profiles/<name>/node_modules 下
+  const fromPath = profileFromSelfPath(root);
+  if (fromPath) return fromPath;
+
+  // 4. link 安装：profile 的依赖写成 link:<源码路径>，且指向自身
+  if (root) {
+    const want = normPath(root);
+    for (const name of names) {
+      const deps = profileDeps(join(home, 'profiles', name));
+      const spec = deps?.['@baitongserver/dsh-plugin-market'];
+      if (!spec || !/^link:/i.test(spec)) continue;
+      const target = spec.slice(5).trim();
+      const abs = isAbsolute(target) ? target : resolve(join(home, 'profiles', name), target);
+      if (normPath(abs) === want) return name;
     }
-  } catch {
-    /* profiles 目录不存在 */
   }
+
+  // 5. 兜底：谁依赖了本包
+  for (const name of names) {
+    const deps = profileDeps(join(home, 'profiles', name));
+    // ⚠️ 键必须与 package.json 的 name 完全一致：这里靠它判断"哪个 profile 装了本插件"，
+    // 对不上会静默 fallback，导致装/卸落到错误的 profile
+    if (deps && deps['@baitongserver/dsh-plugin-market']) return name;
+  }
+
+  // 6. cwd 恰好是 <home>/profiles/<name>
+  const cwd = input.cwd ?? process.cwd();
+  if (normPath(cwd) === normPath(home) + '/profiles') return WEB_PROFILE;
+  const cwdName = basename(cwd);
+  if (isSafeProfile(cwdName) && normPath(dirname(cwd)) === normPath(join(home, 'profiles'))) return cwdName;
+
   return WEB_PROFILE;
 }
 
@@ -186,10 +266,73 @@ export function writeDangerouslyAllowAllBuilds(profileDirectory: string): boolea
   return true;
 }
 
+// ==================== pnpm 供应链冷却期（minimumReleaseAge）处理 ====================
+
+/**
+ * pnpm 的 minimumReleaseAge 会拒绝「刚发布不久」的版本。
+ * 自我升级永远指向最新发布的版本，因此**必然**撞上这道闸：
+ *   ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION ... within the minimumReleaseAge cutoff
+ * 与其他校验不同，官方给了释放口：把该精确版本写进 pnpm-workspace.yaml 的
+ * minimumReleaseAgeExclude 即放行（与 allowBuilds 同一套路）。
+ */
+export function isReleaseAgeBlocked(text: string): boolean {
+  return /ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION|minimumReleaseAge cutoff|failed verification.*lockfile entries/i.test(text);
+}
+
+/** 把 `@scope/name@1.2.3` / `name@1.2.3` 拆成 pnpm 需要的排除项；非精确版本返回 null */
+export function releaseAgeExcludeEntry(source: string): string | null {
+  const spec = source.trim().replace(/^npm:/i, '');
+  // git / link / file / url 等非 registry 规格不走冷却期
+  if (/^(?:github|git\+|file|link|workspace|https?):/i.test(spec)) return null;
+  const at = spec.lastIndexOf('@');
+  const name = at > 0 ? spec.slice(0, at) : '';
+  const version = at > 0 ? spec.slice(at + 1) : '';
+  if (!name || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) return null;
+  return `${name}@${version}`;
+}
+
+export function withMinimumReleaseAgeExclude(yaml: string, entry: string): string {
+  const quoted = `'${entry}'`;
+  const already = new RegExp(`^\\s*-\\s*['"]?${entry.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['"]?\\s*$`, 'm');
+  if (already.test(yaml)) return yaml;
+  const lines = yaml.split('\n');
+  const keyIndex = lines.findIndex((line) => /^\s*minimumReleaseAgeExclude:\s*.*$/.test(line));
+  if (keyIndex === -1) {
+    const block = `minimumReleaseAgeExclude:\n  - ${quoted}\n`;
+    if (yaml.trim() === '') return block;
+    return `${yaml.replace(/\s*$/u, '\n')}\n${block}`;
+  }
+  const baseIndent = /^(\s*)/.exec(lines[keyIndex])?.[1] ?? '';
+  let insertAt = keyIndex + 1;
+  while (insertAt < lines.length && /^\s+-\s/.test(lines[insertAt])) insertAt += 1;
+  lines.splice(insertAt, 0, `${baseIndent}  - ${quoted}`);
+  return lines.join('\n');
+}
+
+export function writeMinimumReleaseAgeExclude(profileDirectory: string, source: string): boolean {
+  const entry = releaseAgeExcludeEntry(source);
+  if (!entry) return false;
+  const file = join(profileDirectory, 'pnpm-workspace.yaml');
+  let yaml = '';
+  try {
+    yaml = readFileSync(file, 'utf8');
+  } catch {
+    /* 下方创建 */
+  }
+  const next = withMinimumReleaseAgeExclude(yaml, entry);
+  if (next === yaml) return false;
+  mkdirSync(profileDirectory, { recursive: true });
+  writeFileSync(file, next);
+  return true;
+}
+
 export function rewritePnpmError(err: unknown): Error {
   const text = err instanceof Error ? err.message : String(err);
   if (isPrepareBlocked(text)) {
     return new Error('该插件需要构建脚本（prepare），pnpm 默认拦截。广场安装会写入 profile 的 dangerouslyAllowAllBuilds 并重试；若仍失败请检查 web profile 是否可写。');
+  }
+  if (isReleaseAgeBlocked(text)) {
+    return new Error('该版本刚发布，被 pnpm 供应链冷却期（minimumReleaseAge）拦截。广场安装会把该版本写入 pnpm-workspace.yaml 的 minimumReleaseAgeExclude 并重试；若仍失败请手动添加该排除项。');
   }
   if (/ERR_PNPM_PUBLIC_HOIST_PATTERN_DIFF/.test(text)) {
     return new Error('当前 profile 的 node_modules 由不同主版本的 pnpm 生成，安装前需要先重建依赖。');
@@ -240,7 +383,7 @@ export async function runDshPlugin(profile: string, pluginArgs: string[]): Promi
   }
 }
 
-/** 安装主链：add → 失败时（hoist 差异）重建依赖重试 →（prepare 拦截）allowAllBuilds 重试 */
+/** 安装主链：add →（冷却期）放开该版本重试 →（hoist 差异）重建依赖重试 →（prepare 拦截）allowAllBuilds 重试 */
 export async function addDshPlugin(source: string, profile = currentProfile()): Promise<string> {
   if (!isSafeProfile(profile)) throw new Error(`非法 profile 名: ${profile}`);
   const dir = profileDir(profile);
@@ -254,6 +397,17 @@ export async function addDshPlugin(source: string, profile = currentProfile()): 
       throw rewritePnpmError(retryErr);
     }
   };
+  const retryAfterReleaseAge = async (err: unknown) => {
+    const text = err instanceof Error ? err.message : String(err);
+    if (!isReleaseAgeBlocked(text)) return await retryAfterPrepare(err);
+    // 该版本刚发布，写进 minimumReleaseAgeExclude 后原样重试即可
+    writeMinimumReleaseAgeExclude(dir, source);
+    try {
+      return await runDshPlugin(profile, ['add', source]);
+    } catch (retryErr) {
+      return await retryAfterPrepare(retryErr);
+    }
+  };
   try {
     return await runDshPlugin(profile, ['add', source]);
   } catch (err) {
@@ -263,10 +417,10 @@ export async function addDshPlugin(source: string, profile = currentProfile()): 
       try {
         return await runDshPlugin(profile, ['add', source]);
       } catch (retryErr) {
-        return await retryAfterPrepare(retryErr);
+        return await retryAfterReleaseAge(retryErr);
       }
     }
-    return await retryAfterPrepare(err);
+    return await retryAfterReleaseAge(err);
   }
 }
 
@@ -287,6 +441,40 @@ export async function removeDshPlugin(pkg: string, profile = currentProfile()): 
     }
     throw rewritePnpmError(err);
   }
+}
+
+/**
+ * 从 pnpm 输出里提炼**可读的原因**。
+ * 加了 `--reporter=ndjson` 后失败输出是几十行 JSON，直接截尾 800 字符只会得到
+ * `"stage":"importing_done"}` 这类无意义片段，把真正的报错淹没掉。
+ */
+export function summarizePnpmFailure(out: string): string {
+  const lines = out.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const parsed: { level?: string; message?: unknown; code?: string; err?: { message?: string; code?: string } }[] = [];
+  for (const line of lines) {
+    if (!line.startsWith('{')) continue;
+    try {
+      parsed.push(JSON.parse(line) as never);
+    } catch {
+      /* 非 JSON 行忽略 */
+    }
+  }
+  // 1) 明确的错误条目优先
+  const bad = parsed.filter((entry) => entry.level === 'error' || entry.err || entry.code);
+  const parts: string[] = [];
+  for (const entry of bad) {
+    const code = entry.err?.code ?? entry.code ?? '';
+    const message = String(entry.err?.message ?? entry.message ?? '').trim();
+    if (!message) continue;
+    const item = code && !message.includes(code) ? `${code}: ${message}` : message;
+    if (!parts.includes(item)) parts.push(item);
+  }
+  if (parts.length > 0) return parts.join(' | ').slice(-1200);
+  // 2) 退回人类可读的非 debug 行
+  const readable = lines.filter((line) => !/"level":"debug"/.test(line) && !/^\s*[{}]?\s*$/.test(line));
+  if (readable.length > 0) return readable.join('\n').slice(-1200);
+  // 3) 兜底：原始输出尾部
+  return out.trim().slice(-800);
 }
 
 export function runCommand(command: string, args: string[], options: RunOptions): Promise<string> {
@@ -330,7 +518,7 @@ export function runCommand(command: string, args: string[], options: RunOptions)
     child.on('error', (err) => finish(err));
     child.on('close', (code) => {
       if (code === 0) finish();
-      else finish(new Error(`命令失败 (exit ${code}): ${out.trim().slice(-800) || 'no output'}`));
+      else finish(new Error(`命令失败 (exit ${code}): ${summarizePnpmFailure(out) || 'no output'}`));
     });
   });
 }

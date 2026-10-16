@@ -7,7 +7,7 @@
  * 安全链：--force 拒绝 / 仅 web profile / GITHUB_PIN pinned 校验 / headSha 一致性 /
  *        loader id 冲突预检（防装完 dsh web 起不来）/ pnpm prepare 拦截自动重试。
  */
-import { readdirSync, readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fetchOpts } from './skill-market.js';
 import { addDshPlugin, currentProfile, isSafeProfile, profileDir, removeDshPlugin } from './dsh-cli.js';
@@ -353,45 +353,35 @@ export async function findPatchIdConflict(source: string, cfg: BaitongConfig): P
 
 // ==================== 安装链 ====================
 
-/** install-plan 校验：拒绝 --force、仅 web profile、pinned github 规格与所选插件一致 */
+/** install-plan 校验：只校验 DSH 执行边界，不替市场内插件规定来源。 */
 export function resolveInstallSource(raw: unknown, expected: { owner: string; name: string; fullName: string }): string {
   if (!raw || typeof raw !== 'object') throw new Error('安装计划无效');
   const plan = raw as Record<string, unknown>;
-  const command = String(plan.command || '');
-  if (/(?:^|\s)--force(?:\s|$)/.test(command) || /(?:^|\s)-f(?:\s|$)/.test(command)) {
-    throw new Error('拒绝带 --force 的安装计划');
-  }
+  const command = String(plan.command || '').trim();
+  if (/(?:^|\s)--force(?:\s|$)/.test(command) || /(?:^|\s)-f(?:\s|$)/.test(command)) throw new Error('拒绝带 --force 的安装计划');
   const profile = String(plan.profile || 'web').trim() || 'web';
   if (profile !== 'web') throw new Error('仅支持 web profile');
   let source = String(plan.source || '').trim();
-  if (!source) {
-    const matched = /^dsh plugin --profile web add (\S+)$/.exec(command.trim());
+  if (!source && command) {
+    const matched = /\bdsh\s+plugin\s+--profile\s+web\s+add\s+(\S+)/i.exec(command);
     if (!matched) throw new Error('安装计划没有可用的 source');
     source = matched[1];
   }
-  const pin = GITHUB_PIN.exec(source);
-  if (!pin) throw new Error('安装计划 source 不是 pinned github 规格');
-  const repo = pin[1];
-  const sha = pin[2];
+  // 各插件可使用 npm、github、git、URL、file/link 等 DSH 支持的安装规格。
+  if (!source || source.length > 2000 || /[\"'&|<>^()%!`\r\n]/.test(source) || source.startsWith('-')) throw new Error('安装计划 source 不是安全的单一安装规格');
   const expectedRepo = `${expected.owner}/${expected.name}`;
-  if (repo.toLowerCase() !== expectedRepo.toLowerCase()) {
-    throw new Error('安装计划仓库与所选插件不一致');
-  }
   const plugin = (plan.plugin && typeof plan.plugin === 'object' ? plan.plugin : {}) as Record<string, unknown>;
   const fullName = String(plugin.fullName || '').trim();
-  if (fullName && fullName.toLowerCase() !== expectedRepo.toLowerCase() && fullName.toLowerCase() !== expected.fullName.toLowerCase()) {
-    throw new Error('安装计划 fullName 与所选插件不一致');
-  }
-  const headSha = String(plugin.headSha || '').trim();
-  if (headSha && headSha.toLowerCase() !== sha.toLowerCase()) {
-    const a = headSha.toLowerCase();
-    const b = sha.toLowerCase();
-    if (!a.startsWith(b) && !b.startsWith(a)) throw new Error('安装计划 commit 与 source 不一致');
-  }
-  const repoUrl = String(plugin.repositoryUrl || '').trim();
-  if (repoUrl) {
-    const ok = new RegExp(`^https://github\\.com/${escapeRegExp(expected.owner)}/${escapeRegExp(expected.name)}(?:\\.git)?/?$`, 'i').test(repoUrl);
-    if (!ok) throw new Error('安装计划仓库地址与所选插件不一致');
+  if (fullName && fullName.toLowerCase() !== expectedRepo.toLowerCase() && fullName.toLowerCase() !== expected.fullName.toLowerCase()) throw new Error('安装计划 fullName 与所选插件不一致');
+  const pin = GITHUB_PIN.exec(source);
+  if (pin) {
+    if (pin[1].toLowerCase() !== expectedRepo.toLowerCase()) throw new Error('安装计划仓库与所选插件不一致');
+    const headSha = String(plugin.headSha || '').trim();
+    if (headSha) {
+      const a = headSha.toLowerCase();
+      const b = pin[2].toLowerCase();
+      if (!a.startsWith(b) && !b.startsWith(a)) throw new Error('安装计划 commit 与 source 不一致');
+    }
   }
   return source;
 }
@@ -455,8 +445,23 @@ export async function uninstallBaitongPlugin(
   if (!(pkg in deps)) {
     throw new Error(`${profile} profile 未安装 ${pkg}，无法卸载`);
   }
-  const log = await removeDshPlugin(pkg, profile);
-  return { pkg, profile, removed: true, log: log.slice(-4000) };
+  try {
+    const log = await removeDshPlugin(pkg, profile);
+    return { pkg, profile, removed: true, log: log.slice(-4000), fallback: false };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (!/cannot resolve profile bundle|cannot resolve package|profile bundle/i.test(message)) throw err;
+    const dir = join(dshHome(), 'profiles', profile);
+    const packageFile = join(dir, 'package.json');
+    const raw = JSON.parse(readFileSync(packageFile, 'utf8')) as Record<string, unknown>;
+    for (const section of ['dependencies', 'devDependencies', 'optionalDependencies']) {
+      const deps = raw[section];
+      if (deps && typeof deps === 'object') delete (deps as Record<string, unknown>)[pkg];
+    }
+    writeFileSync(packageFile, JSON.stringify(raw, null, 2) + '\n');
+    rmSync(join(dir, 'node_modules', ...pkg.split('/')), { recursive: true, force: true });
+    return { pkg, profile, removed: true, fallback: true, log: `清理残留依赖：${message}` };
+  }
 }
 
 /** README 只读预览的字节上限，超过即截断并标记 truncated */

@@ -65,6 +65,12 @@ const EN = {
   '安装失败：': 'Install failed: ',
   '安装被拒绝：': 'Install rejected: ',
   '重启失败：': 'Restart failed: ',
+  '升级中…': 'Upgrading…',
+  '升级失败：': 'Upgrade failed: ',
+  '正在准备升级…': 'Preparing upgrade…',
+  '确认升级到 v{v}？': 'Upgrade to v{v}?',
+  '点击升级到 v{v}': 'Click to upgrade to v{v}',
+  '等待安装结果超时': 'Timed out waiting for the install result',
   '读取失败': 'Read failed',
   '未知原因': 'unknown reason',
   '未知': 'Unknown',
@@ -230,39 +236,135 @@ function Logo({ url, name, fallback = 'P' }) {
  * 数据由宿主提供（前端既读不到包内文件，也不该直连 npm）：`pluginMeta` 返回
  * `{ current, latest, hasUpdate, error }`。宿主侧有一次外网请求（registry，带缓存），
  * **失败只是不亮提醒**（error 字段），不能影响面板本身。
+ *
+ * 🔴 这里是"自己升级自己"的唯一入口（2026-10-16 修）：以前徽标只是个装饰，
+ * 用户看到"有新版本 0.1.6"却升不动 —— profile 里 spec 是 `^0.1.1`，pnpm 认为
+ * lockfile 里的 0.1.1 已满足范围，卸载重装也照样装回 0.1.1。现在点一下走
+ * `pluginSelfUpgrade`，宿主用**显式版本号** `pkg@0.1.7` 强制重新解析。
+ *
+ * 为什么本组件自带轮询而不是复用 MarketPanel 的 restartHint：
+ * 它挂在面板头部（PlazaPage），跟列表状态树无关，也拿不到后者的 setState —— 独立自洽更省事。
  */
 function VersionBadge() {
   const tr = useTr();
   const [meta, setMeta] = useState(null);
-  useEffect(() => {
-    let alive = true;
-    api('pluginMeta').then(([err, data]) => {
-      if (alive && !err && data && data.current) setMeta(data);
-    });
-    return () => { alive = false; };
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState('');
+  const [err, setErr] = useState('');
+  const [restartBusy, setRestartBusy] = useState(false);
+  const [needRestart, setNeedRestart] = useState(false);
+  const aliveRef = useRef(true);
+
+  const refreshMeta = useCallback(async (force) => {
+    const [e, data] = await api('pluginMeta', force ? { check: true } : {});
+    if (aliveRef.current && !e && data && data.current) setMeta(data);
   }, []);
+
+  useEffect(() => {
+    aliveRef.current = true;
+    refreshMeta(false);
+    return () => { aliveRef.current = false; };
+  }, [refreshMeta]);
+
+  /** 轮询安装状态直到终态；上限与宿主安装超时（15min）对齐，避免无限转圈 */
+  const waitInstall = useCallback(async () => {
+    for (let i = 0; i < 900; i += 1) {
+      await new Promise((r) => setTimeout(r, 1200));
+      if (!aliveRef.current) return;
+      const [e, d] = await api('pluginInstallStatus');
+      if (!aliveRef.current) return;
+      if (e) { setErr(tr('升级失败：') + e); return; }
+      if (!d) return;
+      if (d.active) {
+        setNote(d.lastLine || d.phase || tr('升级中…'));
+        continue;
+      }
+      if (d.error) { setErr(tr('升级失败：') + d.error); return; }
+      setNote(tr('操作完成，重启 DSH 后生效'));
+      setNeedRestart(true);
+      await refreshMeta(true);
+      return;
+    }
+    setErr(tr('升级失败：') + tr('等待安装结果超时'));
+  }, [tr, refreshMeta]);
+
+  const upgrade = async () => {
+    if (busy) return;
+    if (!window.confirm(tr('确认升级到 v{v}？', { v: meta.latest }))) return;
+    setBusy(true);
+    setErr('');
+    setNote(tr('正在准备升级…'));
+    setNeedRestart(false);
+    const [e, data] = await api('pluginSelfUpgrade');
+    if (!aliveRef.current) return;
+    if (e) { setBusy(false); setNote(''); setErr(tr('升级失败：') + e); return; }
+    if (data && data.ok === false) {
+      setBusy(false);
+      setNote('');
+      if (data.alreadyLatest) { await refreshMeta(true); return; }
+      // link 安装（本地源码开发）不算失败，是宿主在提示"该走重新构建"，原样透出原因
+      setErr(String(data.error || tr('未知原因')));
+      return;
+    }
+    if (data && data.from) setNote(tr('升级中…'));
+    await waitInstall();
+    if (aliveRef.current) setBusy(false);
+  };
+
+  const restart = async () => {
+    setRestartBusy(true);
+    setErr('');
+    const [e, data] = await api('pluginRestart');
+    if (!aliveRef.current) return;
+    setRestartBusy(false);
+    if (e) setErr(tr('重启失败：') + e);
+    else if (data && data.manual) setErr(tr('无法自动重启，请从系统托盘右键 DSH 图标选择「退出」，再重新打开'));
+  };
+
   if (!meta) return null;
-  const tip = meta.hasUpdate ? tr('有新版本 {v}', { v: meta.latest }) : tr('已是最新版本');
+  const tip = meta.hasUpdate ? tr('点击升级到 v{v}', { v: meta.latest }) : tr('已是最新版本');
   return (
-    <span className={'btm-ver' + (meta.hasUpdate ? ' is-update' : '')} title={tip}>
-      <span className="btm-ver-text">{`v${meta.current}`}</span>
-      <span className="btm-bell" role="img" aria-label={tip}>
-        <svg
-          viewBox="0 0 16 16"
-          width="13"
-          height="13"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.4"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <path d="M3.9 6.7a4.1 4.1 0 0 1 8.2 0v2.8l1.1 1.9H2.8l1.1-1.9z" />
-          <path d="M6.6 13.1a1.4 1.4 0 0 0 2.8 0" />
-        </svg>
-        {meta.hasUpdate ? <i className="btm-bell-dot" /> : null}
+    <span className="btm-ver-wrap">
+      <span
+        className={'btm-ver' + (meta.hasUpdate ? ' is-update' : '') + (meta.hasUpdate && !busy ? ' is-clickable' : '')}
+        title={tip}
+        role={meta.hasUpdate ? 'button' : undefined}
+        tabIndex={meta.hasUpdate ? 0 : undefined}
+        onClick={meta.hasUpdate && !busy ? upgrade : undefined}
+        onKeyDown={
+          meta.hasUpdate && !busy
+            ? (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); upgrade(); } }
+            : undefined
+        }
+      >
+        <span className="btm-ver-text">{`v${meta.current}`}</span>
+        <span className="btm-bell" role="img" aria-label={tip}>
+          <svg
+            viewBox="0 0 16 16"
+            width="13"
+            height="13"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.4"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M3.9 6.7a4.1 4.1 0 0 1 8.2 0v2.8l1.1 1.9H2.8l1.1-1.9z" />
+            <path d="M6.6 13.1a1.4 1.4 0 0 0 2.8 0" />
+          </svg>
+          {meta.hasUpdate ? <i className="btm-bell-dot" /> : null}
+        </span>
+        {meta.hasUpdate ? (
+          <span className="btm-ver-hint">{busy ? tr('升级中…') : tr('有新版本 {v}', { v: meta.latest })}</span>
+        ) : null}
       </span>
-      {meta.hasUpdate ? <span className="btm-ver-hint">{tr('有新版本 {v}', { v: meta.latest })}</span> : null}
+      {note ? <span className="btm-ver-note">{note}</span> : null}
+      {err ? <span className="btm-ver-err" title={err}>{err}</span> : null}
+      {needRestart ? (
+        <button className="btm-ver-restart" onClick={restart} disabled={restartBusy}>
+          {restartBusy ? tr('正在重启…') : tr('立即重启')}
+        </button>
+      ) : null}
     </span>
   );
 }
@@ -447,6 +549,13 @@ const CSS = `
 .btm-close:hover{background:var(--dsw-alias-interactive-bg-hover,#f3f4f6)}
 .btm-ver{display:inline-flex;align-items:center;gap:5px;font-size:11px;line-height:1;color:var(--dsw-alias-label-secondary,#6b7280);border:1px solid var(--dsw-alias-border-l2,#e5e7eb);border-radius:999px;padding:3px 8px;background:var(--dsw-alias-bg-layer-3,#f9fafb);cursor:default}
 .btm-ver.is-update{color:#b45309;border-color:#fcd34d;background:#fef3c7}
+.btm-ver.is-clickable{cursor:pointer}
+.btm-ver.is-clickable:hover{background:#fde68a;border-color:#fbbf24}
+.btm-ver-wrap{display:inline-flex;align-items:center;gap:6px;min-width:0}
+.btm-ver-note{font-size:11px;color:var(--dsw-alias-state-success-primary,#047857);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.btm-ver-err{font-size:11px;color:var(--dsw-alias-state-error-primary,#b91c1c);min-width:0;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.btm-ver-restart{appearance:none;font:inherit;font-size:11px;line-height:1;padding:4px 9px;border-radius:999px;border:1px solid var(--dsw-alias-state-success-primary,#047857);background:var(--dsw-alias-state-success-tertiary,#ecfdf5);color:var(--dsw-alias-state-success-primary,#047857);cursor:pointer}
+.btm-ver-restart:disabled{opacity:.6;cursor:default}
 .btm-ver-text{font-variant-numeric:tabular-nums}
 .btm-bell{position:relative;display:inline-flex;align-items:center}
 .btm-bell svg{display:block}

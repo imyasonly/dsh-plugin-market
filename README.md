@@ -212,7 +212,7 @@ curl -X POST http://127.0.0.1:<port>/baitong-market -d '{"method":"pluginInstall
 
 ## 安全
 
-- **install-plan 校验链**：拒绝带 `--force` 的安装计划、只接受 `web` profile 的计划、要求 pinned GitHub 规格、`headSha` 与所选插件一致
+- **install-plan 校验链**：拒绝带 `--force` 的安装计划、只接受 `web` profile，并按插件计划兼容 npm、github、git、URL、file/link 等 DSH 安装规格；仅对 pinned GitHub 计划校验仓库与 `headSha`
 - **名称白名单**：profile 名与插件包名均按正则校验（`/^[a-z0-9][a-z0-9._-]{0,63}$/i`），防路径穿越
 - **loader id 冲突预检**：安装前检查目标包 `cordis.patch.yml` 的 loader id 是否与已装插件冲突，避免装完起不来
 - **技能包安全**：zip 解压拒绝路径穿越（zip-slip），必须含 `SKILL.md`；插件不执行技能包内的代码

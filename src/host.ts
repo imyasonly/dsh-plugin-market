@@ -197,7 +197,7 @@ export function apply(ctx: HostCtx, config: Partial<BaitongConfig> = {}): void {
 
   ctx.tools.register(defineTool({
     name: 'baitong_plugin_install',
-    description: 'Install a DSH plugin from the Baitong market into the current web profile after the user names one (装第一个 / 安装 dsh-browser). Pass owner and name from baitong_plugin_search results. Runs install-plan checks (pinned sha verified by Baitong review). Do not print CLI commands. After success, tell the user to restart DSH.',
+    description: 'Install a DSH plugin from the Baitong market into the current web profile after the user names one (装第一个 / 安装 dsh-browser). Pass owner and name from baitong_plugin_search results. Follows the plugin install-plan source (npm, GitHub, git, URL, file, or link) with safety checks. Do not print CLI commands. After success, tell the user to restart DSH.',
     parameters: {
       owner: { type: 'string', required: true, description: 'Plugin owner from search' },
       name: { type: 'string', required: true, description: 'Plugin name from search' },
