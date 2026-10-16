@@ -9,7 +9,7 @@ import { getBaitongSkillDetail, installBaitongSkill, installedSlugs, listInstall
 import { PatchProbeUnavailableError, fetchInstallPlan, findPatchIdConflict, installBaitongPlugin, isPluginInstallBusy, listPluginCategories, listPlugins, parsePluginRef, readInstalledPluginMeta, readProfileDependencies, readProfileDependenciesOf, readInstalledPluginReadme, resolveInstallSource, uninstallBaitongPlugin, withPluginInstallLock } from './plugin-market.js';
 import { BOOT_ID, addDshPlugin, currentProfile, profileDir, progress, publicInstallStatus, summarizePnpmFailure, writeMinimumReleaseAgeExclude } from './dsh-cli.js';
 import { assignConfig, publicConfig, sanitizePatch, writeOverlay } from './config-store.js';
-import { detectRuntime, isRestartPending, markRestartPending, restartDesktopApp, scheduleRestart, servingPort, trustedRestartRequest } from './restart.js';
+import { canAutoRestart, detectRuntime, isRestartPending, markRestartPending, restartDesktopApp, scheduleRestart, servingPort, trustedRestartRequest } from './restart.js';
 import type { BaitongConfig } from './config-store.js';
 export async function handleApi(req: IncomingMessage, res: ServerResponse, cfg: BaitongConfig): Promise<void> {
   try {
@@ -313,6 +313,8 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, cfg: 
         restart: true,
         boot: BOOT_ID,
         runtime: detectRuntime(),
+        // 能不能自动重启：false 时前端直接展示「手动重启步骤」，不摆一个点了没用的按钮
+        canAutoRestart: canAutoRestart(),
         // 实际生效的百通 API 根地址：装机后不用翻配置就能确认连的是生产还是私有化地址
         apiBase: cfg.apiBase,
         // 网络环境快照：排查 "fetch failed" 用（DSH 进程实际看到的代理变量 + 运行时版本）
@@ -360,8 +362,17 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, cfg: 
 
     // ===== 版本自检（面板头部版本号 + 更新提醒） =====
     if (method === 'pluginMeta') {
-      // body.check === true（升级完重新拉一次）时绕过缓存，否则升完还显示旧 current
-      return sendJson(res, 200, { ok: true, ...(await pluginVersionSnapshot(cfg, { force: body.check === true })) });
+      // 三种触发时机（全部经由这里）：
+      //   check=true  点升级前后的**硬刷新** —— 必须拿到当下的 latest，不能拿缓存当升级目标；
+      //   open=true   用户打开面板 / 面板定时复查 —— 走 60s 软过期，发了新版重开面板即可看到；
+      //   都不传       后台自查 —— 沿用 1 小时成功缓存 / 5 分钟失败缓存。
+      const opts =
+        body.check === true
+          ? { force: true }
+          : body.open === true
+            ? { maxAgeMs: VERSION_TTL_OPEN }
+            : {};
+      return sendJson(res, 200, { ok: true, ...(await pluginVersionSnapshot(cfg, opts)) });
     }
 
     sendJson(res, 400, { ok: false, error: 'unknown method' });
@@ -446,17 +457,32 @@ let versionCache: { at: number; value: VersionSnapshot } | null = null;
 /** 命中缓存省一次外网请求；失败只缓存 5 分钟，别把一次网络抖动记成一小时 */
 const VERSION_TTL_OK = 60 * 60 * 1000;
 const VERSION_TTL_FAIL = 5 * 60 * 1000;
+/**
+ * **用户打开面板**时的软过期（2026-10-16 修）。
+ *
+ * 事故：成功结果缓存 1 小时 + 徽标只在挂载时查一次 ⇒ 发了新版后「点 X 关掉面板再进来」
+ * 依然命中缓存，用户根本看不到更新提醒（只能等满 1 小时）。
+ * 打开面板是明确的「现在就查一次」信号，所以给它一个很短的窗口：
+ * 60s 内反复开关面板仍然吃缓存（不把 registry 打成筛子），超过就真查一次。
+ */
+const VERSION_TTL_OPEN = 60 * 1000;
 
 /**
  * 面板头部用：当前版本 + 线上 latest + 是否有更新。
  * 🔴 网络失败**不影响面板**：返回 `error` 字段，前端只是不亮喇叭（不报错、不阻塞）。
  *
- * @param force 跳过缓存重新拉（点击"升级"前必须拿到**当下**的 latest，不能拿一小时前的缓存当目标版本）
+ * @param force    跳过缓存重新拉（点击"升级"前必须拿到**当下**的 latest，不能拿一小时前的缓存当目标版本）
+ * @param maxAgeMs 自定义成功缓存的软过期（打开面板传 VERSION_TTL_OPEN）；不传 = 原来的 1 小时
  */
-export async function pluginVersionSnapshot(cfg: BaitongConfig, opts: { force?: boolean } = {}): Promise<VersionSnapshot> {
+export async function pluginVersionSnapshot(
+  cfg: BaitongConfig,
+  opts: { force?: boolean; maxAgeMs?: number } = {},
+): Promise<VersionSnapshot> {
   const now = Date.now();
-  if (!opts.force && versionCache) {
-    const ttl = versionCache.value.error ? VERSION_TTL_FAIL : VERSION_TTL_OK;
+  const maxAge = opts.force ? 0 : (opts.maxAgeMs ?? VERSION_TTL_OK);
+  if (versionCache) {
+    // 失败结果自己的 5 分钟上限仍然生效（但不会超过本次请求允许的软过期）
+    const ttl = versionCache.value.error ? Math.min(VERSION_TTL_FAIL, maxAge) : maxAge;
     if (now - versionCache.at < ttl) return versionCache.value;
   }
   const current = currentPluginVersion();

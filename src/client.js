@@ -118,6 +118,9 @@ const EN = {
   '正在重启…': 'Restarting…',
   '稍后': 'Later',
   '无法自动重启，请从系统托盘右键 DSH 图标选择「退出」，再重新打开': 'Auto-restart unavailable. Please quit DSH from the system tray (right-click the tray icon → Quit), then open it again.',
+  '无法自动重启，请在运行 dsh web 的终端按 Ctrl+C 停止，再重新执行 dsh web，然后刷新本页': 'Auto-restart unavailable. Press Ctrl+C in the terminal running dsh web, start it again with dsh web, then refresh this page.',
+  '升级完成，需要重启 DSH 后生效': 'Upgrade complete. Restart DSH to take effect.',
+  '正在重启，稍候请刷新本页': 'Restarting — please refresh this page in a moment.',
   '请先打开一个会话': 'Open a session first',
   '面板渲染失败': 'Panel render failed',
   '面板渲染失败：': 'Panel render failed: ',
@@ -174,6 +177,22 @@ function I18nProvider({ t, children }) {
 /** 组件内取翻译函数：优先用 slot 注入的 t（跟随 Harness），否则回落到模块级探测 */
 function useTr() {
   return React.useContext(I18nCtx) || lookup;
+}
+
+/**
+ * 手动重启指引：**web 与桌面端重启方式完全不同**，不能共用一句话。
+ *
+ * runtime 由宿主给出（pluginInstallStatus / pluginRestart 的 `runtime`，即 detectRuntime）：
+ *   - desktop：应用级重启，只能从系统托盘退出后重新打开；
+ *   - web：进程由 `dsh web` 拉起，需在终端 Ctrl+C 后重新执行，并刷新本页。
+ *
+ * 拿不到 runtime 时按 web 处理：web 的指引在任何环境都不会误导，
+ * 而"系统托盘"那句在 web 端是错的。
+ */
+function manualRestartHint(t, runtime) {
+  return runtime === 'desktop'
+    ? t('无法自动重启，请从系统托盘右键 DSH 图标选择「退出」，再重新打开')
+    : t('无法自动重启，请在运行 dsh web 的终端按 Ctrl+C 停止，再重新执行 dsh web，然后刷新本页');
 }
 
 /** 注册给 DSH 的词表（zh 需自带全部键，否则框架侧取不到值） */
@@ -267,6 +286,12 @@ function Logo({ url, name, fallback = 'P', glyph = false }) {
  * `{ current, latest, hasUpdate, error }`。宿主侧有一次外网请求（registry，带缓存），
  * **失败只是不亮提醒**（error 字段），不能影响面板本身。
  *
+ * 检查时机（2026-10-16 修）：以前只有「徽标挂载」这一个时机，而宿主成功结果缓存 1 小时，
+ * 于是**点 X 关掉面板再进来照样看到旧结论**，发了新版也不提示。现在三个时机：
+ *   1. 打开面板（本组件挂载）→ `open`，宿主侧 60s 软过期，重开面板就能发现新版；
+ *   2. 面板一直开着 → 每 5 分钟静默复查一次，长时间挂着也能收到提醒；
+ *   3. 切回本页（visibilitychange）/ 点升级前后 → 复查，升级那两次是**硬刷新**。
+ *
  * 🔴 这里是"自己升级自己"的唯一入口（2026-10-16 修）：以前徽标只是个装饰，
  * 用户看到"有新版本 0.1.6"却升不动 —— profile 里 spec 是 `^0.1.1`，pnpm 认为
  * lockfile 里的 0.1.1 已满足范围，卸载重装也照样装回 0.1.1。现在点一下走
@@ -283,17 +308,39 @@ function VersionBadge() {
   const [err, setErr] = useState('');
   const [restartBusy, setRestartBusy] = useState(false);
   const [needRestart, setNeedRestart] = useState(false);
+  // 运行环境与"能否自动重启"：false 时直接摆手动步骤，不给点了没用的按钮
+  const [runtime, setRuntime] = useState('');
+  const [canAuto, setCanAuto] = useState(null);
+  const [manual, setManual] = useState(false);
   const aliveRef = useRef(true);
 
-  const refreshMeta = useCallback(async (force) => {
-    const [e, data] = await api('pluginMeta', force ? { check: true } : {});
+  /**
+   * @param mode 'open'  打开面板/定时复查：宿主侧 60s 软过期，发了新版重开面板就能看到；
+   *             'force' 升级前后的硬刷新：必须拿到当下的 latest，不能拿缓存当升级目标。
+   */
+  const refreshMeta = useCallback(async (mode) => {
+    const body = mode === 'force' ? { check: true } : mode === 'open' ? { open: true } : {};
+    const [e, data] = await api('pluginMeta', body);
     if (aliveRef.current && !e && data && data.current) setMeta(data);
   }, []);
 
   useEffect(() => {
     aliveRef.current = true;
-    refreshMeta(false);
+    // ① 打开面板：用户主动查看 → 立刻查一次（宿主侧仍有 60s 下限，狂开关面板不会连打）
+    refreshMeta('open');
     return () => { aliveRef.current = false; };
+  }, [refreshMeta]);
+
+  useEffect(() => {
+    // ② 面板一直开着：每 5 分钟静默复查，别让"有新版本"要求用户先关再开
+    const id = setInterval(() => { if (aliveRef.current) refreshMeta('open'); }, 5 * 60 * 1000);
+    // ③ 从别的窗口/标签切回本页：顺手复查一次（同样受宿主 60s 下限保护）
+    const onVisible = () => { if (!document.hidden && aliveRef.current) refreshMeta('open'); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [refreshMeta]);
 
   /** 轮询安装状态直到终态；上限与宿主安装超时（15min）对齐，避免无限转圈 */
@@ -310,9 +357,12 @@ function VersionBadge() {
         continue;
       }
       if (d.error) { setErr(tr('升级失败：') + d.error); return; }
-      setNote(tr('操作完成，重启 DSH 后生效'));
+      // 升级只落了磁盘：**必须重启 DSH 才生效**，所以这里同时给出平台相关的手动步骤
+      if (d.runtime) setRuntime(d.runtime);
+      if (typeof d.canAutoRestart === 'boolean') setCanAuto(d.canAutoRestart);
+      setNote(tr('升级完成，需要重启 DSH 后生效'));
       setNeedRestart(true);
-      await refreshMeta(true);
+      await refreshMeta('force');
       return;
     }
     setErr(tr('升级失败：') + tr('等待安装结果超时'));
@@ -325,13 +375,14 @@ function VersionBadge() {
     setErr('');
     setNote(tr('正在准备升级…'));
     setNeedRestart(false);
+    setManual(false);
     const [e, data] = await api('pluginSelfUpgrade');
     if (!aliveRef.current) return;
     if (e) { setBusy(false); setNote(''); setErr(tr('升级失败：') + e); return; }
     if (data && data.ok === false) {
       setBusy(false);
       setNote('');
-      if (data.alreadyLatest) { await refreshMeta(true); return; }
+      if (data.alreadyLatest) { await refreshMeta('force'); return; }
       // link 安装（本地源码开发）不算失败，是宿主在提示"该走重新构建"，原样透出原因
       setErr(String(data.error || tr('未知原因')));
       return;
@@ -344,11 +395,16 @@ function VersionBadge() {
   const restart = async () => {
     setRestartBusy(true);
     setErr('');
+    // 桌面端走 Electron 应用级重启；拿不到 Electron API 时后端返回 manual，
+    // 这里如实换成"手动步骤"常驻显示，不做"假装重启"
     const [e, data] = await api('pluginRestart');
     if (!aliveRef.current) return;
     setRestartBusy(false);
-    if (e) setErr(tr('重启失败：') + e);
-    else if (data && data.manual) setErr(tr('无法自动重启，请从系统托盘右键 DSH 图标选择「退出」，再重新打开'));
+    if (e) { setErr(tr('重启失败：') + e); return; }
+    if (data && data.runtime) setRuntime(data.runtime);
+    if (data && data.manual) { setManual(true); return; }
+    // 已受理：web 端进程会重建，页面要刷新才能连上新进程
+    setNote(tr('正在重启，稍候请刷新本页'));
   };
 
   if (!meta) return null;
@@ -390,7 +446,10 @@ function VersionBadge() {
       </span>
       {note ? <span className="btm-ver-note">{note}</span> : null}
       {err ? <span className="btm-ver-err" title={err}>{err}</span> : null}
-      {needRestart ? (
+      {needRestart && (canAuto === false || manual) ? (
+        // 明确不能自动重启（如桌面端拿不到 Electron API）：直接给手动步骤
+        <span className="btm-ver-manual">{manualRestartHint(tr, runtime)}</span>
+      ) : needRestart ? (
         <button className="btm-ver-restart" onClick={restart} disabled={restartBusy}>
           {restartBusy ? tr('正在重启…') : tr('立即重启')}
         </button>
@@ -586,6 +645,10 @@ const CSS = `
 .btm-ver-err{font-size:11px;color:var(--dsw-alias-state-error-primary,#b91c1c);min-width:0;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .btm-ver-restart{appearance:none;font:inherit;font-size:11px;line-height:1;padding:4px 9px;border-radius:999px;border:1px solid var(--dsw-alias-state-success-primary,#047857);background:var(--dsw-alias-state-success-tertiary,#ecfdf5);color:var(--dsw-alias-state-success-primary,#047857);cursor:pointer}
 .btm-ver-restart:disabled{opacity:.6;cursor:default}
+/* 手动重启步骤：文字较长，允许换行，不用 ellipsis 把指令裁掉 */
+.btm-ver-manual{font-size:11px;line-height:15px;color:var(--dsw-alias-state-warning-primary,#b45309);min-width:0;max-width:460px}
+.btm-banner-manual{font-size:11px;line-height:15px;color:var(--dsw-alias-state-warning-primary,#b45309);min-width:0}
+.btm-tv-manual{font-size:11px;line-height:15px;color:var(--dsw-alias-state-warning-primary,#b45309);min-width:0;text-align:right}
 .btm-ver-text{font-variant-numeric:tabular-nums}
 .btm-bell{position:relative;display:inline-flex;align-items:center}
 .btm-bell svg{display:block}
@@ -837,6 +900,8 @@ function markdownInline(text) {
  *   - 图片强制走本机图标代理，否则 COS 直连在离线/内网环境必然裂图
  */
 const HTML_TAG_RE = /<\/?[a-zA-Z][^>]*>/;
+/** Markdown 路径下直接丢弃的"纯装饰容器"标签：align/style 本来就不放行，留着只会和渲染器生成的 <p> 互相嵌套 */
+const MARKDOWN_DROP_TAGS = new Set(['div', 'p', 'span', 'figure', 'figcaption']);
 const ALLOWED_HTML_TAGS = new Set([
   'a', 'b', 'blockquote', 'br', 'code', 'dd', 'del', 'div', 'dl', 'dt', 'em',
   'figcaption', 'figure', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr', 'i', 'img',
@@ -884,21 +949,26 @@ function safeUrl(raw, allowDataImage) {
   return url;
 }
 
-/** 白名单净化 HTML：只留展示性标签与安全属性，其余标签改为文本、危险元素整段删除。 */
-function sanitizeHtml(raw) {
-  const src = String(raw || '');
-  // ① 先整段删除危险元素及其内容（必须在标签处理之前，否则会留下碎片）
-  const withoutBlocks = DANGEROUS_BLOCKS.reduce((acc, re) => acc.replace(re, ''), src);
-  // ② 逐个标签处理。
-  //    🔴 顺序陷阱：不能「先拼标签、最后统一 escapeHtml」—— 那样会把刚生成的
-  //    合法标签一起转义掉（实测 `<img src=...>` → `&lt;img...&gt;`，图片又不显示了）。
-  //    正确做法是**先把标签抠出来替换成占位符，剩余文本转义，再把标签放回去**。
+/**
+ * 把文本里的 HTML 标签按白名单抠成占位符（`\u0000N\u0000`），返回 { text, slots }。
+ *
+ * 为什么拆成共用函数：两条渲染路径必须用**同一套**放行规则，否则迟早跑偏 ——
+ *   - 整篇 HTML（后端富文本概述）→ sanitizeHtml：非白名单标签直接删掉；
+ *   - Markdown 里混 HTML（README 十有八九带 `<div align="center"><img …>`）→
+ *     renderMarkdownSafe：Markdown 交给渲染器，HTML 标签走同一套白名单保留。
+ *
+ * @param keepUnknown true：非白名单标签原样留着（Markdown 路径用，转义后当纯文本显示，
+ *                    避免把 `<profile>` 这类代码示例整段删掉）；false：直接删掉标签（HTML 净化路径用）
+ */
+function extractAllowedHtml(raw, keepUnknown = false) {
   const slots = [];
-  const withSlots = withoutBlocks.replace(
+  const withSlots = String(raw || '').replace(
     /<\/?([a-zA-Z][a-zA-Z0-9-]*)((?:[^>"']|"[^"]*"|'[^']*')*)>/g,
     (match, tagRaw, attrRaw) => {
       const tag = tagRaw.toLowerCase();
-      if (!ALLOWED_HTML_TAGS.has(tag)) return ''; // 不在白名单 → 抹掉标签本身
+      if (!ALLOWED_HTML_TAGS.has(tag)) return keepUnknown ? match : ''; // 非白名单：Markdown 路径原样留着当文本，HTML 路径直接删掉
+      // Markdown 路径：装饰性容器整对丢掉，只留里面的内容（图片/换行等仍在）
+      if (keepUnknown && MARKDOWN_DROP_TAGS.has(tag)) return '';
       // 🔴 闭合标签也必须走占位符，不能直接返回 `</p>` ——
       //    直接返回的话，第③步的 escapeHtml 会把它转义成 `&lt;/p&gt;`，
       //    产出就是"标签开了没关"（实测踩过）。
@@ -916,9 +986,11 @@ function sanitizeHtml(raw) {
         if (tag === 'img') {
           if (name === 'src') {
             const url = safeUrl(value, true);
-            // 走本机图标代理：离线/内网环境下 COS 直连必然裂图
-            if (!url) return '';
-            attrs.push(`src="${escapeAttr(iconUrl(url))}"`);
+            // 只保留能代理到的绝对地址：https / data:image / 站内 `/` 开头。
+            // README 里的相对路径（icon.svg、docs/x.png）是包内文件，代理过去必然 404 ⇒ 直接丢图，不露破图
+            const proxyable = !!url && (/^https:\/\//i.test(url) || /^data:image\//i.test(url) || url.startsWith('/'));
+            if (!proxyable) return '';
+            attrs.push(`src="${escapeAttr(iconUrl(url))}"`); // 走本机图标代理：离线/内网环境下直连必然裂图
           } else if (name === 'alt') attrs.push(`alt="${escapeAttr(value)}"`);
           else if (name === 'width' || name === 'height') {
             const n = Number(value);
@@ -941,20 +1013,67 @@ function sanitizeHtml(raw) {
       return `\u0000${slots.length - 1}\u0000`;
     },
   );
+  return { text: withSlots, slots };
+}
+
+/** 把占位符换回真实标签（`\u0000N\u0000` → slots[N]） */
+function restoreSlots(html, slots) {
+  return String(html).replace(/\u0000(\d+)\u0000/g, (_, i) => slots[Number(i)] ?? '');
+}
+
+/** 白名单净化 HTML：只留展示性标签与安全属性，其余标签改为文本、危险元素整段删除。 */
+function sanitizeHtml(raw) {
+  // ① 先整段删除危险元素及其内容（必须在标签处理之前，否则会留下碎片）
+  const withoutBlocks = DANGEROUS_BLOCKS.reduce((acc, re) => acc.replace(re, ''), String(raw || ''));
+  // ② 标签先抠成占位符，剩余文本再统一转义。
+  //    🔴 顺序陷阱：不能「先拼标签、最后统一转义」—— 那样会把刚生成的合法标签一起转义掉
+  //    （实测 `<img src=...>` → `&lt;img...&gt;`，图片又不显示了）。
+  const { text, slots } = extractAllowedHtml(withoutBlocks);
   // ③ 转义剩余文本（标签已抠成占位符，不会被误伤）
-  const escaped = withSlots.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   // ④ 放回标签
-  return escaped.replace(/\u0000(\d+)\u0000/g, (_, i) => slots[Number(i)]);
+  return restoreSlots(escaped, slots);
 }
 
 /**
- * 概述渲染总入口：按内容形态分派。
- * 后端给HTML（常见于富文本概述，图片就是这么丢的）→ 白名单净化；
- * 给 Markdown → 原有渲染（先转义再解析，安全模型不变）。
+ * 块级 Markdown 特征：命中任意一条就按 Markdown 渲染（见 renderRichText）。
+ * 用块级语法而不是"有没有尖括号"判定，是因为 README 几乎都含 HTML 标签。
+ */
+function looksLikeMarkdown(raw) {
+  return (
+    /^#{1,6}[ \t]+\S/m.test(raw) ||        // # 标题
+    /^[ \t]*```/m.test(raw) ||             // ``` 代码围栏
+    /^[ \t]*[-*+][ \t]+\S/m.test(raw) ||   // - 无序列表
+    /^[ \t]*\d+[.)][ \t]+\S/m.test(raw) || // 1. 有序列表
+    /^[ \t]*\|.*\|[ \t]*$/m.test(raw) ||   // | 表格 |
+    /\[[^\]]+\]\([^)\s]+\)/.test(raw)      // [文字](链接)
+  );
+}
+
+/**
+ * Markdown 渲染：先把白名单 HTML 标签抠成占位符，渲染完再放回。
+ * README 常见写法是"Markdown 正文 + 少量 HTML（居中容器/徽章/图片）"，这样两边都不丢。
+ */
+function renderMarkdownSafe(raw) {
+  const { text, slots } = extractAllowedHtml(raw, true);
+  return restoreSlots(renderMarkdown(text), slots);
+}
+
+/**
+ * 富文本渲染总入口：**先判断这份内容该按 Markdown 还是 HTML 渲染**。
+ *
+ * 🔴 旧实现只看"是否含 HTML 标签"：README.md 几乎都带 `<img>` / `<div align>` / `<br>`，
+ * 于是整篇被当成 HTML 净化，`#` 标题、`-` 列表、`|` 表格、``` 代码块**全被转义成纯文本**
+ * —— 用户看到的就是"格式渲染失败"。现在按块级 Markdown 特征判定：
+ *
+ *   - 有 Markdown 块语法 ⇒ Markdown 渲染（HTML 标签按白名单保留）；
+ *   - 否则含 HTML 标签 ⇒ 白名单净化（后端富文本概述走这条）；
+ *   - 都没有 ⇒ 按 Markdown 渲染（段落/换行）。
  */
 function renderRichText(source) {
   const raw = String(source == null ? '' : source);
   if (!raw.trim()) return '';
+  if (looksLikeMarkdown(raw)) return renderMarkdownSafe(raw);
   return HTML_TAG_RE.test(raw) ? sanitizeHtml(raw) : renderMarkdown(raw);
 }
 
@@ -1680,7 +1799,7 @@ function MarketPanel({ ctx }) {
     const [err, data] = await api('pluginRestart');
     setRestartBusy(false);
     if (err) setError(t('重启失败：') + err);
-    else if (data && data.manual) setError(t('无法自动重启，请从系统托盘右键 DSH 图标选择「退出」，再重新打开'));
+    else if (data && data.manual) setError(manualRestartHint(t, data.runtime));
   };
 
   // 技能分类：从已加载数据里取真实 category（接口不提供分类列表，也不支持按分类查询）
@@ -1762,9 +1881,14 @@ function MarketPanel({ ctx }) {
       {restartHint && (
         <div className="btm-banner">
           <span>{t('操作完成，重启 DSH 后生效')}</span>
-          <button className="btm-btn primary" disabled={restartBusy} onClick={restart}>
-            {restartBusy ? t('正在重启…') : t('立即重启')}
-          </button>
+          {status && status.canAutoRestart === false ? (
+            // 装完也**必须重启才生效**；宿主明确说不能自动重启时直接给手动步骤
+            <span className="btm-banner-manual">{manualRestartHint(t, status.runtime)}</span>
+          ) : (
+            <button className="btm-btn primary" disabled={restartBusy} onClick={restart}>
+              {restartBusy ? t('正在重启…') : t('立即重启')}
+            </button>
+          )}
           <button className="btm-btn" onClick={() => setRestartHint(false)}>
             {t('稍后')}
           </button>
@@ -2027,7 +2151,7 @@ function PluginSearchToolView(props) {
     const [e, data] = await api('pluginRestart');
     setRestartBusy(false);
     if (e) setErr(tr('重启失败：') + e);
-    else if (data && data.manual) setErr(tr('无法自动重启，请从系统托盘右键 DSH 图标选择「退出」，再重新打开'));
+    else if (data && data.manual) setErr(manualRestartHint(tr, data.runtime));
   };
 
   if (!items.length) return null;
@@ -2109,9 +2233,13 @@ function PluginSearchToolView(props) {
       {note ? (
         <div className="btm-tv-done">
           <span>{note}</span>
-          <button type="button" className="btm-btn primary" disabled={restartBusy} onClick={restart}>
-            {restartBusy ? tr('正在重启…') : tr('立即重启')}
-          </button>
+          {progress && progress.canAutoRestart === false ? (
+            <span className="btm-tv-manual">{manualRestartHint(tr, progress.runtime)}</span>
+          ) : (
+            <button type="button" className="btm-btn primary" disabled={restartBusy} onClick={restart}>
+              {restartBusy ? tr('正在重启…') : tr('立即重启')}
+            </button>
+          )}
         </div>
       ) : null}
     </div>

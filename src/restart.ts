@@ -111,6 +111,24 @@ export function restartDesktopApp(delayMs = 400, forceExitAfterMs = 2500): Deskt
   return { via: 'electron-relaunch', manual: false };
 }
 
+/**
+ * 探测「能不能自动重启」——**只探测，不动任何进程**。
+ *
+ * 桌面端的一键重启依赖 Electron 主进程 API，拿不到时就是做不到（见 restartDesktopApp）。
+ * 提前把结论告诉 UI，用户才会**直接看到手动步骤**，而不是点了「立即重启」才发现重启不了。
+ * 判定条件与 restartDesktopApp 完全一致：relaunch + quit 都必须是函数。
+ */
+export function canAutoRestart(): boolean {
+  if (detectRuntime() !== 'desktop') return true; // web 端由 helper 进程按原入口重新拉起
+  try {
+    const mod = createRequire(import.meta.url)('electron') as ElectronModuleLike;
+    const app = mod && mod.app;
+    return !!(app && typeof app.relaunch === 'function' && typeof app.quit === 'function');
+  } catch {
+    return false;
+  }
+}
+
 /* ============================ 重启防重标记 ============================ */
 
 /**
