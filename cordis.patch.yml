@@ -1,0 +1,5 @@
+# 百通插件广场的 loader 补丁：注册 bundle 入口。
+# loader id 必须全局唯一（与其他已装插件的 id 不冲突，可同时存在）。
+- insert:
+    - id: baitong-plugin-market
+      name: '@baitongserver/dsh-plugin-market'

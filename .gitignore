@@ -1,0 +1,25 @@
+# 依赖
+node_modules/
+
+# 构建产物：lib/ 由 `pnpm build` 生成（tsc + esbuild），不入版本库。
+# 注意：npm 发包靠 package.json 的 files 白名单，与本文件无关（发布时会重新构建）。
+lib/
+
+# 本机私有联调配置（含私有化 apiBase），随仓库走会泄露到代码库
+cordis.patch.local.yml
+
+# 自检脚本的临时产物（打包 tarball、隔离 node_modules 等）
+logs/_verify/_tmp/
+*.tgz
+
+# 包管理器：本项目用 pnpm，pnpm-lock.yaml 入库；npm 生成的 lock 不入库避免双份冲突
+package-lock.json
+
+# 杂项
+.DS_Store
+Thumbs.db
+*.log
+coverage/
+dist/
+.idea/
+.vscode/
