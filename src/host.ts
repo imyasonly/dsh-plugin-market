@@ -10,7 +10,11 @@ import { cloneJson, renderSkillSearch, renderSkillInstall, renderSkillList, rend
 import { searchBaitongSkills, installBaitongSkill, listInstalledSkills, uninstallBaitongSkill, installedSlugs, parseSkillCategory, SKILL_CATEGORY_KEYS } from './skill-market.js';
 import { withDefaults, assignConfig, readOverlay, envApiBase, DEFAULT_API_BASE, type BaitongConfig } from './config-store.js';
 import { searchBaitongPlugins, installBaitongPlugin, PLUGIN_CATEGORY_KEYS, withPluginInstallLock } from './plugin-market.js';
-import { handleApi, handleIcon } from './local-api.js';
+import { handleApi, handleIcon, handleLogo } from './local-api.js';
+import { handleProbe as handleProbeRoute } from './probe.js';
+import { appendLog } from './oplog.js';
+import { currentPluginVersion } from './local-api.js';
+import { currentProfile } from './dsh-cli.js';
 import { INSTALL_TIMEOUT_MS } from './dsh-cli.js';
 
 export const name = 'baitong-plugin-market';
@@ -23,6 +27,8 @@ export const Config = Schema.object({
   timeoutMs: Schema.number().default(20000).description('上游请求超时（毫秒）'),
   userAgent: Schema.string().default('Mozilla/5.0 (compatible; baitong-market/0.1)').description('请求 UA'),
   maxResults: Schema.number().default(12).description('搜索结果上限'),
+  npmRegistry: Schema.string().description('npm 镜像源（留空跟随本机 npm 配置）'),
+  checkUpdatesOnStart: Schema.boolean().default(true).description('启动时检查插件更新'),
 });
 
 /** Cordis 上下文最小形态（宿主注入；inject 按服务名解构回调） */
@@ -50,6 +56,10 @@ function asLen(meta: unknown, key: string): number {
 export function apply(ctx: HostCtx, config: Partial<BaitongConfig> = {}): void {
   const cfg = withDefaults(config);
   assignConfig(cfg, readOverlay());
+
+  // 系统日志：随宿主启动记一条（对齐 dsh-plugin 的做法）——保证「打开日志就有内容」，
+  // 也让用户能确认插件确实被加载过、当前生效的 profile 与 apiBase。
+  appendLog('info', 'system', 'system.boot', `插件启动：v${currentPluginVersion()} · profile ${currentProfile()} · apiBase ${cfg.apiBase}`);
 
   // ============ 技能工具（数据走百通 CLI 兼容接口：公共技能 + 团队技能合并） ============
 
@@ -251,6 +261,25 @@ export function apply(ctx: HostCtx, config: Partial<BaitongConfig> = {}): void {
     }).webServer;
     server.register({ kind: 'exact', path: '/baitong-market', handler: (req, res) => handleApi(req, res, cfg) });
     server.register({ kind: 'exact', path: '/baitong-market/icon', handler: (req, res) => handleIcon(req, res, cfg) });
+    server.register({ kind: 'exact', path: '/baitong-market/logo', handler: (req, res) => handleLogo(req, res) });
+    server.register({
+      kind: 'exact',
+      path: '/baitong-market/probe',
+      handler: (req, res) => {
+        // 单通道重测：POST body { key }；全量探测 body 为空
+        void (async () => {
+          let only: string | undefined;
+          try {
+            const chunks: Buffer[] = [];
+            const request = req as unknown as NodeJS.ReadableStream;
+            for await (const c of request) chunks.push(c as Buffer);
+            const body = JSON.parse(Buffer.concat(chunks).toString() || '{}') as { key?: unknown };
+            if (body && (body.key === 'npm' || body.key === 'github' || body.key === 'catalog')) only = body.key;
+          } catch { /* 空/坏 body = 全量 */ }
+          await handleProbeRoute(req, res, cfg, only);
+        })();
+      },
+    });
   });
 
   // ============ 设置页（配置项 + 保存即生效） ============

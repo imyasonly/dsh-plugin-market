@@ -353,6 +353,47 @@ export async function findPatchIdConflict(source: string, cfg: BaitongConfig): P
 
 // ==================== 安装链 ====================
 
+/**
+ * 批量查询一组 npm 包的线上 latest 版本（已安装列表的「可更新」标签用）。
+ *
+ * 只处理 registry 形态的 spec（pnpm/git/link/file 源没有 latest 概念，跳过）；
+ * registry 主源失败换镜像源；单包失败不影响其余（返回表里就是没有该键）。
+ * 并发数控制在 6：已安装插件通常 <20 个，registry 顶得住，也不会拖慢面板。
+ */
+export async function fetchLatestVersions(
+  pkgs: string[],
+  cfg: BaitongConfig,
+): Promise<Record<string, string>> {
+  const REGISTRY_RE = /^(?:[\w@.-]+\/)?[\w.-]+$/;
+  const targets = [...new Set(pkgs.map((p) => p.trim()).filter(Boolean))].slice(0, 60);
+  const results: Record<string, string> = {};
+  const queue = [...targets];
+  const worker = async () => {
+    for (;;) {
+      const pkg = queue.shift();
+      if (pkg === undefined) return;
+      if (!REGISTRY_RE.test(pkg)) continue;
+      for (const base of ['https://registry.npmjs.org', 'https://registry.npmmirror.com']) {
+        try {
+          const json = await fetchJson<{ version?: unknown }>(
+            `${base}/${encodeURIComponent(pkg).replace(/%40/gi, '@').replace(/%2f/gi, '/')}/latest`,
+            { timeoutMs: Math.min(cfg.timeoutMs, 8000), userAgent: cfg.userAgent },
+          );
+          const v = typeof json?.version === 'string' ? json.version : '';
+          if (v) { results[pkg] = v; break; }
+        } catch { /* 换下一个源 */ }
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: 6 }, worker));
+  return results;
+}
+
+/** 已装 spec 是 registry 形态（非 github/git+/link/file/workspace）才有「线上 latest」可比 */
+export function isRegistrySpec(spec: string): boolean {
+  return !!spec && !/^(?:github:|git\+|git:|link:|file:|workspace:|https?:)/i.test(spec.trim());
+}
+
 /** install-plan 校验：只校验 DSH 执行边界，不替市场内插件规定来源。 */
 export function resolveInstallSource(raw: unknown, expected: { owner: string; name: string; fullName: string }): string {
   if (!raw || typeof raw !== 'object') throw new Error('安装计划无效');

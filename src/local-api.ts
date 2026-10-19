@@ -3,14 +3,79 @@
  * method 分发：按 method 分派到各端点；新增技能面板所需端点。
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { fetchBytes, fetchJson, proxyEnvSnapshot } from './http.js';
-import { getBaitongSkillDetail, installBaitongSkill, installedSlugs, listInstalledSkills, readSkillLockEntry, searchBaitongSkills, uninstallBaitongSkill } from './skill-market.js';
-import { PatchProbeUnavailableError, fetchInstallPlan, findPatchIdConflict, installBaitongPlugin, isPluginInstallBusy, listPluginCategories, listPlugins, parsePluginRef, readInstalledPluginMeta, readProfileDependencies, readProfileDependenciesOf, readInstalledPluginReadme, resolveInstallSource, uninstallBaitongPlugin, withPluginInstallLock } from './plugin-market.js';
-import { BOOT_ID, addDshPlugin, currentProfile, profileDir, progress, publicInstallStatus, summarizePnpmFailure, writeMinimumReleaseAgeExclude } from './dsh-cli.js';
-import { assignConfig, publicConfig, sanitizePatch, writeOverlay } from './config-store.js';
+import { getBaitongSkillDetail, installBaitongSkill, installedSlugs, listInstalledSkills, readSkillLockEntry, searchBaitongSkills, uninstallBaitongSkill, SKILL_CATEGORY_TABS } from './skill-market.js';
+import { PatchProbeUnavailableError, fetchInstallPlan, fetchLatestVersions, findPatchIdConflict, installBaitongPlugin, isPluginInstallBusy, isRegistrySpec, listPluginCategories, listPlugins, parsePluginRef, readInstalledPluginMeta, readProfileDependencies, readProfileDependenciesOf, readInstalledPluginReadme, resolveInstallSource, uninstallBaitongPlugin, withPluginInstallLock } from './plugin-market.js';
+import { BOOT_ID, addDshPlugin, bundledDshEntry, currentProfile, profileDir, progress, publicInstallStatus, summarizePnpmFailure, writeMinimumReleaseAgeExclude } from './dsh-cli.js';
+import { assignConfig, dshHome, publicConfig, sanitizePatch, withDefaults, writeOverlay } from './config-store.js';
+import { appendLog, clearLogs, logFilePath, readLogs, CATEGORIES, LEVELS, type LogCategory, type LogLevel } from './oplog.js';
 import { canAutoRestart, detectRuntime, isRestartPending, markRestartPending, restartDesktopApp, scheduleRestart, servingPort, trustedRestartRequest } from './restart.js';
 import type { BaitongConfig } from './config-store.js';
+/**
+ * 自定义安装目标解析（对齐 dsh-plugin-hub 的口径）：
+ *   - 裸包名（含 @scope/pkg）直接用；
+ *   - `npm install|i <pkgs>` / `pnpm add|i|install <pkgs>` 取包列表（只取第一个，DSH 是单插件安装）；
+ *   - 完整 `dsh plugin --profile <p> add <target>` 提取 target。
+ * 每个包名按 npm 语法校验并拒绝 `-` 开头的 token（npm 会把 --xxx 当参数，防注入任意 CLI 参数）。
+ */
+const CUSTOM_PKG_RE = /^(?:@[a-z0-9._-]+\/[a-z0-9._-]+|[a-z0-9][a-z0-9._-]*)$/i;
+const NPM_INSTALL_CMD_RE = /^(?:npm\s+(?:install|i)|pnpm\s+(?:add|i|install))\s+(.+)$/i;
+const DSH_PLUGIN_CMD_RE = /^dsh\s+plugin\s+--profile(?:\s+|=)\S+\s+add\s+(.+)$/i;
+
+/** 命令行工具版本探测（对齐 dsh-plugin）：500ms 超时，win32 需 shell 解析 .cmd shim；失败返回 null */
+function toolVersion(cmd: string, args: string[]): string | null {
+  try {
+    const r = spawnSync(cmd, args, { timeout: 500, encoding: 'utf8', shell: process.platform === 'win32' });
+    if (r.error || r.status !== 0) return null;
+    const first = String(r.stdout || '').trim().split(/\r?\n/)[0] || '';
+    const m = /\d+\.\d+[0-9A-Za-z.\-+]*/.exec(first);
+    return m ? m[0] : null;
+  } catch {
+    return null;
+  }
+}
+
+/** dsh 不在 PATH 时：从 bundledDshEntry 的 bin.js 所在包读版本 */
+function dshVersionFromEntry(entry: { file: string; args: string[] } | null): string | null {
+  const binJs = entry?.args?.[0];
+  if (!binJs) return null;
+  try {
+    const pkg = JSON.parse(readFileSync(join(dirname(dirname(binJs)), 'package.json'), 'utf8')) as { version?: unknown };
+    return typeof pkg.version === 'string' ? pkg.version : null;
+  } catch {
+    return null;
+  }
+}
+
+export function parseCustomTarget(raw: string): string | null {
+  const input = String(raw || '').trim();
+  if (!input || input.length > 500) return null;
+  const dshMatch = DSH_PLUGIN_CMD_RE.exec(input);
+  if (dshMatch) return validateSinglePkg(dshMatch[1].trim());
+  const npmMatch = NPM_INSTALL_CMD_RE.exec(input);
+  if (npmMatch) {
+    const pkgs = npmMatch[1].trim().split(/\s+/).filter(Boolean);
+    if (pkgs.length === 0 || pkgs.some((p) => p.startsWith('-') || !CUSTOM_PKG_RE.test(p))) return null;
+    return validateSinglePkg(pkgs[0]);
+  }
+  return validateSinglePkg(input);
+}
+
+function validateSinglePkg(target: string): string | null {
+  if (!target || target.startsWith('-')) return null;
+  // 允许 npm 精确版本/tag：pkg@1.2.3 / pkg@latest
+  const at = target.lastIndexOf('@');
+  const base = at > 0 ? target.slice(0, at) : target;
+  const tag = at > 0 ? target.slice(at + 1) : '';
+  if (!CUSTOM_PKG_RE.test(base)) return null;
+  if (tag && !/^[\w.+=-]+$/.test(tag)) return null;
+  return target;
+}
+
 export async function handleApi(req: IncomingMessage, res: ServerResponse, cfg: BaitongConfig): Promise<void> {
   try {
     const url = new URL(req.url || '/', 'http://127.0.0.1');
@@ -23,8 +88,11 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, cfg: 
       const explicit = Number(body.limit);
       const limit = Number.isFinite(explicit) && explicit > 0 ? Math.min(Math.max(explicit, 1), 80) : cfg.maxResults;
       const offset = Math.max(0, Math.floor(Number(body.offset) || 0));
+      // 服务端分类（技能页 Tab）：categoryId 入参，白名单校验防任意值透传
+      const rawCat = String(body.categoryId ?? url.searchParams.get('categoryId') ?? '').trim();
+      const categoryId = SKILL_CATEGORY_TABS.some((c) => c.id === rawCat) ? rawCat : undefined;
       const installed = await installedSlugs(cfg.skillsDir);
-      const result = await searchBaitongSkills(query, { cfg, limit, offset, installed });
+      const result = await searchBaitongSkills(query, { cfg, limit, offset, installed, categoryId });
       return sendJson(res, 200, { ok: true, ...result });
     }
     if (method === 'skillInstall') {
@@ -186,6 +254,7 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, cfg: 
       } catch (err) {
         return sendJson(res, 200, { ok: false, error: err instanceof Error ? err.message : String(err), profile });
       }
+      appendLog('info', 'install', 'install.start', `开始安装 ${String(source)}（${profile}）${warning ? '（预检已跳过）' : ''}`);
       void (async () => {
         try {
           const result = await withPluginInstallLock(() => installBaitongPlugin({
@@ -194,9 +263,11 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, cfg: 
           }, cfg, profile));
           progress.error = null;
           progress.lastLine = `安装完成：${String(result.fullName)}（${profile} profile），重启 dsh ${profile} 后生效`;
+          appendLog('success', 'install', 'install.done', `安装 ${String(result.fullName)} → ${String(result.source)}（${profile}）`);
         } catch (err) {
           const text = err instanceof Error ? err.message : String(err);
           if (progress.error === null) progress.error = text.slice(0, 800);
+          appendLog('error', 'install', 'install.fail', `安装失败（${profile}）：${text.slice(0, 300)}`);
         }
       })();
       return sendJson(res, 200, { ok: true, started: true, source, profile, warning });
@@ -264,6 +335,117 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, cfg: 
       })();
       return sendJson(res, 200, { ok: true, started: true, source, profile, from: snap.current, to: snap.latest });
     }
+    // ===== 已安装插件的「可更新」标签：批量查线上 latest =====
+    if (method === 'pluginLatestVersions') {
+      const deps = readProfileDependencies();
+      const registryDeps = deps.filter((d) => isRegistrySpec(d.spec));
+      let latest: Record<string, string> = {};
+      try {
+        latest = await fetchLatestVersions(registryDeps.map((d) => d.pkg), cfg);
+      } catch {
+        /* 全部失败：返回空表，前端不显示更新标签 */
+      }
+      const items = deps.map((d) => {
+        const installed = readInstalledPluginMeta(d.pkg, d.profiles);
+        const current = installed?.version ?? '';
+        const latestV = latest[d.pkg] ?? '';
+        return {
+          pkg: d.pkg,
+          current,
+          latest: latestV,
+          // 与自升级同口径：线上确实更新才亮标签
+          hasUpdate: !!(current && latestV && compareVersions(latestV, current) > 0),
+        };
+      });
+      return sendJson(res, 200, { ok: true, items });
+    }
+    // ===== 更新单个已安装插件（dsh-plugin 的经验：pnpm add pkg 无版本 = 幂等空转，必须 @latest） =====
+    if (method === 'pluginUpdate') {
+      const pkg = String(body.pkg ?? url.searchParams.get('pkg') ?? '').trim();
+      const profile = String(body.profile ?? url.searchParams.get('profile') ?? '').trim() || currentProfile();
+      if (!pkg) return sendJson(res, 400, { ok: false, error: '缺少 pkg' });
+      const deps = readProfileDependenciesOf(profile);
+      if (!(pkg in deps)) {
+        return sendJson(res, 200, { ok: false, error: `${profile} profile 未安装 ${pkg}`, profile });
+      }
+      if (!isRegistrySpec(deps[pkg])) {
+        return sendJson(res, 200, { ok: false, error: `该插件来自 ${deps[pkg]}，非 registry 源不支持自动更新`, profile });
+      }
+      if (isPluginInstallBusy() || progress.active) {
+        return sendJson(res, 409, { ok: false, error: '已有安装任务在进行中', profile });
+      }
+      // 🔴 必须显式 @latest：pnpm add <pkg>（无版本）对已存在依赖是幂等空转
+      //（"Already up to date"），导致「更新成功」但版本没变 —— 与自升级同根因。
+      const source = `${pkg}@latest`;
+      progress.error = null;
+      progress.lastLine = '';
+      appendLog('info', 'update', 'update.start', `开始更新 ${pkg} → @latest（${profile}）`);
+      void (async () => {
+        try {
+          await withPluginInstallLock(() => addDshPlugin(source, profile));
+          progress.error = null;
+          progress.lastLine = `更新完成：${pkg}（${profile} profile），重启 DSH 后生效`;
+          appendLog('success', 'update', 'update.done', `更新 ${pkg} → @latest（${profile}）`);
+        } catch (err) {
+          const text = err instanceof Error ? err.message : String(err);
+          if (progress.error === null) progress.error = summarizePnpmFailure(text).slice(0, 800) || text.slice(0, 800);
+          appendLog('error', 'update', 'update.fail', `更新失败 ${pkg}（${profile}）：${text.slice(0, 300)}`);
+        }
+      })();
+      return sendJson(res, 200, { ok: true, started: true, source, profile });
+    }
+    // ===== 自定义安装：裸包名 / npm|pnpm 命令 / 完整 dsh 命令 =====
+    if (method === 'pluginCustomInstall') {
+      const raw = String(body.target ?? url.searchParams.get('target') ?? '').trim();
+      const profile = String(body.profile ?? url.searchParams.get('profile') ?? '').trim() || currentProfile();
+      if (!raw) return sendJson(res, 400, { ok: false, error: '缺少安装目标' });
+      if (isPluginInstallBusy() || progress.active) {
+        return sendJson(res, 409, { ok: false, error: '已有安装任务在进行中', profile });
+      }
+      const source = parseCustomTarget(raw);
+      if (!source) {
+        return sendJson(res, 200, { ok: false, error: '无法识别的安装目标（支持裸包名 / npm|pnpm install 命令 / dsh plugin 命令）', profile });
+      }
+      progress.error = null;
+      progress.lastLine = '';
+      appendLog('info', 'install', 'install.custom.start', `开始自定义安装 ${source}（${profile}）`);
+      void (async () => {
+        try {
+          await withPluginInstallLock(() => addDshPlugin(source, profile));
+          progress.error = null;
+          progress.lastLine = `安装完成：${source}（${profile} profile），重启 DSH 后生效`;
+          appendLog('success', 'install', 'install.custom.done', `自定义安装 ${source}（${profile}）`);
+        } catch (err) {
+          const text = err instanceof Error ? err.message : String(err);
+          if (progress.error === null) progress.error = summarizePnpmFailure(text).slice(0, 800) || text.slice(0, 800);
+          appendLog('error', 'install', 'install.custom.fail', `自定义安装失败 ${source}（${profile}）：${text.slice(0, 300)}`);
+        }
+      })();
+      return sendJson(res, 200, { ok: true, started: true, source, profile });
+    }
+    // ===== 在系统文件管理器中定位已安装插件目录 =====
+    if (method === 'pluginReveal') {
+      const pkg = String(body.pkg ?? url.searchParams.get('pkg') ?? '').trim();
+      const profile = String(body.profile ?? url.searchParams.get('profile') ?? '').trim() || currentProfile();
+      if (!pkg) return sendJson(res, 400, { ok: false, error: '缺少 pkg' });
+      if (!(pkg in readProfileDependenciesOf(profile))) {
+        return sendJson(res, 200, { ok: false, error: `${profile} profile 未安装 ${pkg}` });
+      }
+      const dir = join(profileDir(profile), 'node_modules', ...pkg.split('/'));
+      if (!existsSync(dir)) {
+        return sendJson(res, 200, { ok: false, error: `插件目录不存在：${dir}` });
+      }
+      // macOS Finder -R 定位选中；Windows explorer /select,；Linux 退化为打开目录
+      const bin = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'explorer' : 'xdg-open';
+      const args = process.platform === 'darwin' ? ['-R', dir] : process.platform === 'win32' ? ['/select,', dir] : [dir];
+      try {
+        const child = spawn(bin, args, { detached: true, stdio: 'ignore' });
+        child.unref();
+        return sendJson(res, 200, { ok: true, path: dir });
+      } catch (err) {
+        return sendJson(res, 200, { ok: false, error: err instanceof Error ? err.message : String(err) });
+      }
+    }
     if (method === 'pluginReadme') {
       // 已安装插件的 README 只读预览（本地读，不联网）
       const pkg = String(body.pkg ?? url.searchParams.get('pkg') ?? '').trim();
@@ -293,14 +475,17 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, cfg: 
       } catch (err) {
         return sendJson(res, 200, { ok: false, error: err instanceof Error ? err.message : String(err), profile });
       }
+      appendLog('info', 'uninstall', 'uninstall.start', `开始卸载 ${pkg}（${profile}）`);
       void (async () => {
         try {
           const result = await withPluginInstallLock(() => uninstallBaitongPlugin(pkg, profile));
           progress.error = null;
           progress.lastLine = `已卸载：${String(result.pkg)}（${profile} profile），重启 dsh ${profile} 后生效`;
+          appendLog('success', 'uninstall', 'uninstall.done', `卸载 ${pkg}（${profile}）${result.fallback ? '（清理残留）' : ''}`);
         } catch (err) {
           const text = err instanceof Error ? err.message : String(err);
           if (progress.error === null) progress.error = text.slice(0, 800);
+          appendLog('error', 'uninstall', 'uninstall.fail', `卸载失败 ${pkg}（${profile}）：${text.slice(0, 300)}`);
         }
       })();
       return sendJson(res, 200, { ok: true, started: true, pkg, profile });
@@ -351,11 +536,116 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, cfg: 
       return sendJson(res, 202, { ok: true, runtime, pid: result.pid, helperPid: result.helperPid, via: result.via, manual: false });
     }
 
+    // ===== 诊断：环境快照（含 dsh/pnpm/npm/git 版本），排查"别人电脑装不上"用 =====
+    if (method === 'pluginDiagnostics') {
+      const entry = bundledDshEntry();
+      appendLog('info', 'diagnostics', 'diagnostics.view', '查看诊断信息');
+      return sendJson(res, 200, {
+        ok: true,
+        version: currentPluginVersion(),
+        runtime: detectRuntime(),
+        canAutoRestart: canAutoRestart(),
+        node: process.version,
+        electron: process.versions.electron ?? null,
+        platform: process.platform + ' ' + process.arch,
+        cliEntry: entry ? entry.file : null, // null = 只能靠 PATH（未启用注册的机器在此暴露）
+        dshHome: dshHome(),
+        profile: currentProfile(),
+        apiBase: cfg.apiBase,
+        npmRegistry: cfg.npmRegistry,
+        proxy: proxyEnvSnapshot(),
+        dshVersion: toolVersion('dsh', ['--version']) ?? dshVersionFromEntry(entry),
+        pnpmVersion: toolVersion('pnpm', ['--version']),
+        npmVersion: toolVersion('npm', ['--version']),
+        gitVersion: toolVersion('git', ['--version']),
+      });
+    }
+    // ===== 结构化操作日志：level×category 过滤 + 关键词 + 分页；另带安装目录预览 =====
+    if (method === 'pluginLogs') {
+      // body 优先（面板走 POST），GET 走 searchParams：两端点口径一致，便于命令行排查
+      const q = (k: string) => String(body[k] ?? url.searchParams.get(k) ?? '');
+      const result = readLogs({
+        offset: Math.max(0, Math.floor(Number(q('offset')) || 0)),
+        limit: Math.min(Math.max(Number(q('limit')) || 50, 1), 200),
+        category: (CATEGORIES as string[]).includes(q('category')) ? (q('category') as LogCategory) : 'all',
+        level: (LEVELS as string[]).includes(q('level')) ? (q('level') as LogLevel) : 'all',
+        query: q('query').trim() || undefined,
+      });
+      const dir = join(profileDir(currentProfile()), '.plugin-manager', 'logs');
+      const ops: Record<string, unknown>[] = [];
+      try {
+        for (const op of readdirSync(dir)
+          .filter((n) => n.startsWith('operation-'))
+          .map((n) => ({ name: n, stat: statSync(join(dir, n)) }))
+          .sort((a, b) => b.stat.mtimeMs - a.stat.mtimeMs)
+          .slice(0, 10)) {
+          const logFile = join(dir, op.name, 'install.log');
+          let summary = '';
+          let failed = false;
+          try {
+            const text = readFileSync(logFile, 'utf8');
+            const m = /# FAILED: ([^\n]+)/.exec(text);
+            failed = !!m;
+            summary = m ? m[1].slice(0, 200) : (text.split('\n').find((l) => l.startsWith('# ')) || '').slice(0, 200);
+          } catch { /* 无 install.log */ }
+          ops.push({ id: op.name, time: new Date(op.stat.mtimeMs).toISOString(), failed, summary });
+        }
+      } catch { /* 目录不存在 */ }
+      return sendJson(res, 200, { ok: true, ...result, path: logFilePath(), ops });
+    }
+    // ===== 单条安装日志全文（查看器弹窗用） =====
+    if (method === 'pluginLogRead') {
+      const id = String(body.id ?? url.searchParams.get('id') ?? '').trim();
+      if (!/^operation-[A-Za-z0-9-]{1,64}$/.test(id)) return sendJson(res, 400, { ok: false, error: '非法日志 id' });
+      const file = join(profileDir(currentProfile()), '.plugin-manager', 'logs', id, 'install.log');
+      try {
+        const text = readFileSync(file, 'utf8');
+        return sendJson(res, 200, { ok: true, id, text: text.slice(-64 * 1024) });
+      } catch {
+        return sendJson(res, 200, { ok: false, error: '日志不存在或已清理' });
+      }
+    }
+    // ===== 清空日志（截断 + 记一条"已清空"）=====
+    if (method === 'pluginLogClear') {
+      const ok = clearLogs();
+      if (ok) appendLog('info', 'system', 'system.clear', '日志已由用户清空');
+      return sendJson(res, 200, ok ? { ok: true } : { ok: false, error: '清空失败' });
+    }
+    // ===== 在文件管理器中定位日志文件 =====
+    if (method === 'pluginLogReveal') {
+      const file = logFilePath();
+      // 🔴 先确认存在：explorer /select, 对不存在的路径不会报错，而是打开「我的文档」——
+      // 用户看到窗口打开却定位不到，会以为功能坏了。这里显式告知。
+      if (!existsSync(file)) {
+        return sendJson(res, 200, { ok: false, error: '日志文件还不存在（尚无操作记录）', path: file });
+      }
+      try {
+        const bin = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'explorer' : 'xdg-open';
+        const args = process.platform === 'darwin' ? ['-R', file] : process.platform === 'win32' ? ['/select,', file] : [file];
+        const child = spawn(bin, args, { detached: true, stdio: 'ignore' });
+        child.unref();
+        return sendJson(res, 200, { ok: true, path: file });
+      } catch (err) {
+        return sendJson(res, 200, { ok: false, error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    // ===== 重置配置：删 overlay，回包内默认值 =====
+    if (method === 'pluginResetConfig') {
+      try {
+        rmSync(join(dshHome(), 'baitong-market.json'), { force: true });
+        assignConfig(cfg, { ...withDefaults({}) });
+        appendLog('warn', 'settings', 'settings.reset', '重置全部设置为默认值');
+        return sendJson(res, 200, { ok: true, ...publicConfig(cfg) });
+      } catch (err) {
+        return sendJson(res, 200, { ok: false, error: err instanceof Error ? err.message : String(err) });
+      }
+    }
     // ===== 配置 =====
     if (method === 'config') {
       if (body.save) {
         assignConfig(cfg, sanitizePatch(body));
         writeOverlay(cfg);
+        appendLog('info', 'settings', 'settings.update', '保存设置：' + JSON.stringify(sanitizePatch(body)));
       }
       return sendJson(res, 200, { ok: true, ...publicConfig(cfg) });
     }
@@ -366,11 +656,15 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, cfg: 
       //   check=true  点升级前后的**硬刷新** —— 必须拿到当下的 latest，不能拿缓存当升级目标；
       //   open=true   用户打开面板 / 面板定时复查 —— 走 60s 软过期，发了新版重开面板即可看到；
       //   都不传       后台自查 —— 沿用 1 小时成功缓存 / 5 分钟失败缓存。
+      // checkUpdatesOnStart=false 时 open 模式改为 skip（不联网，吃缓存）；
+      // check=true（点升级前后）不受影响——那是用户显式动作
       const opts =
         body.check === true
           ? { force: true }
           : body.open === true
-            ? { maxAgeMs: VERSION_TTL_OPEN }
+            ? cfg.checkUpdatesOnStart === false
+              ? { skip: true }
+              : { maxAgeMs: VERSION_TTL_OPEN }
             : {};
       return sendJson(res, 200, { ok: true, ...(await pluginVersionSnapshot(cfg, opts)) });
     }
@@ -476,9 +770,14 @@ const VERSION_TTL_OPEN = 60 * 1000;
  */
 export async function pluginVersionSnapshot(
   cfg: BaitongConfig,
-  opts: { force?: boolean; maxAgeMs?: number } = {},
+  opts: { force?: boolean; maxAgeMs?: number; skip?: boolean } = {},
 ): Promise<VersionSnapshot> {
   const now = Date.now();
+  // skip（checkUpdatesOnStart=false 时的 open 模式）：不联网，有缓存吃缓存、没缓存只报 current
+  if (opts.skip) {
+    if (versionCache) return versionCache.value;
+    return { current: currentPluginVersion(), latest: '', hasUpdate: false, source: '', checkedAt: now, error: null };
+  }
   const maxAge = opts.force ? 0 : (opts.maxAgeMs ?? VERSION_TTL_OK);
   if (versionCache) {
     // 失败结果自己的 5 分钟上限仍然生效（但不会超过本次请求允许的软过期）
@@ -542,6 +841,32 @@ export function resolveIconTarget(raw: string, apiBase: string): string | null {
     return resolved.protocol === 'https:' ? resolved.href : null;
   } catch {
     return null;
+  }
+}
+
+/**
+ * 插件自带 logo：面板头部「百通插件广场」左侧的标识。
+ *
+ * 为什么不塞进 client.js 的 data URI：图片 28KB，base64 后 ~37KB 会让客户端 bundle
+ * 从 115KB 涨到 150KB+，且每次换图都要重编 JS。走固定路径的本机端点，浏览器还能缓存。
+ *
+ * 文件名写死、无用户输入，不存在路径穿越面。
+ */
+const LOGO_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', 'assets', 'baitong-logo.jpg');
+let logoCache: Buffer | null = null;
+
+export function handleLogo(_req: IncomingMessage, res: ServerResponse): void {
+  try {
+    if (logoCache === null) logoCache = readFileSync(LOGO_PATH);
+    res.writeHead(200, {
+      'content-type': 'image/jpeg',
+      'content-length': String(logoCache.length),
+      'cache-control': 'public, max-age=86400',
+    });
+    res.end(logoCache);
+  } catch {
+    res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
+    res.end('logo not found');
   }
 }
 

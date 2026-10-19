@@ -143,7 +143,7 @@ dsh plugin --profile desktop add @baitongserver/dsh-plugin-market
 | 2 | 设置页保存 → `$DSH_HOME/baitong-market.json` | GUI，⚠️ 会覆盖下面几项 |
 | 3 | `~/.dsh/profiles/<profile>/cordis.patch.yml` | **GUI 启动唯一入口**（自动加载 + 支持热重载） |
 | 4 | 仓库内 `cordis.patch.local.yml` + `--patch` | 本地联调，不随包发布 |
-| 5 | 默认值 `https://ts.1100111.cn/baitong_ai`（0.1.9 起临时指向测试环境；生产为 `https://s.1100111.cn/baitong_ai`） | 无需配置 |
+| 5 | 默认值 `https://s.1100111.cn/baitong_ai`（生产；0.1.9–0.1.11 曾临时指向测试环境 `ts.`） | 无需配置 |
 
 ### 私有化部署示例
 

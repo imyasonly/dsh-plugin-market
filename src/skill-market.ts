@@ -15,6 +15,16 @@ import { fetchBytes, fetchJson, HttpError } from './http.js';
 import type { BaitongConfig } from './config-store.js';
 import { unzipToDir } from './unzip.js';
 
+/**
+ * 技能页分类 Tab（2026-10-19）：百通技能库的服务端分类，id 即查询入参 categoryId。
+ * 目前就这三类；后端新增分类时在此补一行即可（前端胶囊从 skillSearch 响应里拿）。
+ */
+export const SKILL_CATEGORY_TABS: { id: string; name: string }[] = [
+  { id: '2059122609146032129', name: '医疗' },
+  { id: '2059192712453611521', name: '医药' },
+  { id: '2059441305076809730', name: '大健康' },
+];
+
 /** 技能分类（对齐百通技能库的分类展示口径；不参与接口过滤，仅卡片标签） */
 export const SKILL_CATEGORIES: Record<string, string> = {
   efficiency: '效率办公',
@@ -67,6 +77,8 @@ function unwrapR<T>(body: unknown, fallback: T): T {
 export interface SkillSearchOpts {
   cfg: BaitongConfig;
   category?: string;
+  /** 服务端分类 ID（SKILL_CATEGORY_TABS 之一）：传给后端的 categoryId 查询参数 */
+  categoryId?: string;
   limit: number;
   offset: number;
   installed: Set<string>;
@@ -77,6 +89,7 @@ export async function searchBaitongSkills(query: string, opts: SkillSearchOpts):
   const { cfg, limit, offset, installed } = opts;
   const params = new URLSearchParams();
   if (query) params.set('q', query);
+  if (opts.categoryId && /^d{1,32}$/.test(opts.categoryId)) params.set('categoryId', opts.categoryId);
   params.set('offset', String(offset));
   params.set('limit', String(Math.min(limit, 100)));
   const url = `${trimBase(cfg.apiBase)}/api/v1/search?${params.toString()}`;
@@ -120,6 +133,8 @@ export async function searchBaitongSkills(query: string, opts: SkillSearchOpts):
     total,
     offset,
     hasMore: offset + items.length < total,
+    // 分类 Tab 一并带出（前端不用写死，加分类改宿主一处即可）
+    categories: SKILL_CATEGORY_TABS,
   };
 }
 
@@ -302,16 +317,28 @@ export async function listInstalledSkills(skillsDir: string): Promise<Record<str
     try {
       if (!statSync(dir).isDirectory()) continue;
       if (!existsSync(join(dir, 'SKILL.md'))) continue;
-      // _meta.json 尽力读取（缺省 version/时间等）
+      // _meta.json 尽力读取（缺省 version/时间等）。
+      // 🔴 name 取安装时落盘的真实技能名（detail.name），目录名只是 slug（BT_xxx 编码）——
+      // 之前直接拿目录名当 name，已安装列表的主标题就变成了一串编码。
       let version = '';
+      let skillName = '';
       let metaTime: string | null = null;
       let files = 0;
       let bytes = 0;
       try {
         const meta = JSON.parse(readFileSync(join(dir, '_meta.json'), 'utf8'));
         version = String(meta.version || '');
+        skillName = String(meta.name || '').trim();
         metaTime = meta.publishedAt ? new Date(Number(meta.publishedAt) || meta.publishedAt).toISOString() : null;
       } catch { /* 无 _meta.json */ }
+      // _meta.json 没有名字时退回 SKILL.md frontmatter 的 name: 行（手工安装的技能只有这一处有名字）
+      if (!skillName) {
+        try {
+          const head = readFileSync(join(dir, 'SKILL.md'), 'utf8').slice(0, 4096);
+          const m = /^name:\s*(.+)$/m.exec(head);
+          if (m) skillName = m[1].trim().replace(/^(["'])(.*)\1$/, '$2');
+        } catch { /* SKILL.md 上面已校验存在，读失败忽略 */ }
+      }
       try {
         for (const f of readdirSync(dir)) {
           files += 1;
@@ -320,7 +347,7 @@ export async function listInstalledSkills(skillsDir: string): Promise<Record<str
       } catch { /* 计数失败忽略 */ }
       items.push({
         slug: name,
-        name,
+        name: skillName || name, // 真实技能名；实在读不到再回退目录名
         version,
         files,
         bytes,

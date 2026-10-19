@@ -142,6 +142,99 @@ const EN = {
   '已卸载': 'Uninstalled',
   '完成': 'Done',
   '安装完成，重启 dsh 后生效': 'Installed. Restart dsh to take effect.',
+  '失败详情已记录，可把该文件发给开发者排查：': 'Failure details were logged. Send this file to the developer for diagnosis: ',
+  '可更新': 'Updatable',
+  '当前 {a} → 最新 {b}': '{a} → {b}',
+  '在文件夹中显示': 'Reveal in folder',
+  '文件夹': 'Folder',
+  '无法识别的安装目标': 'Unrecognized install target',
+  '自定义安装': 'Custom install',
+  '手动安装市场目录之外的插件：npm 包名、GitHub 仓库或本地路径。装完的条目会出现在「已安装」列表。': 'Install plugins outside the market catalog: an npm package name, a GitHub repo, or a local path. Installed entries show up under Installed.',
+  '请求超时（毫秒）': 'Request timeout (ms)',
+  '搜索结果上限': 'Max search results',
+  '保存': 'Save',
+  '已保存': 'Saved',
+  '收起': 'Collapse',
+  '展开': 'Expand',
+  '加载更多': 'Load more',
+  '正在加载…': 'Loading…',
+  '宇宙有没有边界人类尚未得知，我的边界被你探索到啦~': 'Whether the universe has an edge, humankind has yet to know — but you have explored mine~',
+  '医疗': 'Medical',
+  '设置': 'Settings',
+  '连通性探测': 'Connectivity probes',
+  'npm registry（依赖安装通道）': 'npm registry (dependency channel)',
+  'GitHub（git 源与预检通道）': 'GitHub (git sources & pre-checks)',
+  '百通目录站（数据源）': 'Baitong catalog (data source)',
+  '探测中…': 'Probing…',
+  '重测': 'Re-probe',
+  '全部重测': 'Re-probe all',
+  '可用': 'Reachable',
+  '不可达': 'Unreachable',
+  '工具链版本': 'Toolchain versions',
+  '类别': 'Category',
+  '级别': 'Level',
+  '关键词': 'Keyword',
+  '全部类别': 'All categories',
+  '全部级别': 'All levels',
+  '导出日志': 'Export logs',
+  '安装日志查看器': 'Install log viewer',
+  '更多日志': 'More logs',
+  '接口地址、技能目录与请求参数': 'API base, skills directory, and request parameters',
+  '启动检查更新与 npm 镜像源': 'Update checks on start and npm registry',
+  '医药': 'Pharma',
+  '大健康': 'Wellness',
+  '常规': 'General',
+  '诊断': 'Diagnostics',
+  '操作日志': 'Operation logs',
+  '重置': 'Reset',
+  '常规设置：接口地址、npm 镜像源与启动检查更新': 'General: API base, npm registry, and update checks on start',
+  '环境快照：版本、运行时与 CLI 入口，排查安装问题用': 'Environment snapshot: version, runtime, CLI entry — for diagnosing install issues',
+  '最近 20 次安装 / 更新 / 卸载记录': 'Last 20 install / update / uninstall operations',
+  '删除本地覆盖配置，恢复为插件默认值': 'Remove local config overrides and restore plugin defaults',
+  '仅重置本插件（百通插件广场）的设置：更新策略、镜像源等恢复默认值，不影响 DSH 其他插件': 'Reset only this plugin\'s (Baitong Plugin Plaza) settings — update policy, registry mirror, etc. restored to defaults. Other DSH plugins are not affected.',
+  '配置': 'Config',
+  '数据源与运行参数': 'Data source and runtime parameters',
+  '确认继续？': 'Continue?',
+  '已安装插件与技能的版本检查、一键更新，以及更新策略': 'Version checks and one-click updates for installed plugins and skills, plus update policy',
+  '插件更新': 'Plugin updates',
+  '技能更新': 'Skill updates',
+  '暂无可更新的插件': 'No plugins with updates',
+  '显示配置菜单': 'Show config menu',
+  '隐藏配置菜单': 'Hide config menu',
+  '配置菜单已显示（再次连点标题三次可重新显示）': 'Config menu is now visible (triple-click the title again to re-show)',
+  '日志文件': 'Log file',
+  '已复制': 'Copied',
+  '系统日志': 'System log',
+  '打开日志查看器': 'Open log viewer',
+  '清空日志': 'Clear log',
+  '确认清空所有日志？此操作不可撤销': 'Clear all logs? This cannot be undone.',
+  '已清空': 'Cleared',
+  '警告': 'Warning',
+  '调试': 'Debug',
+  '清空筛选': 'Clear filters',
+  '最近 {n} 次操作记录': 'Last {n} operations',
+  'npm 镜像源': 'npm registry',
+  '启动时检查更新': 'Check for updates on start',
+  '未配置（跟随本机 npm）': 'Not set (follow local npm)',
+  'npm 官方源': 'npm official',
+  'npmmirror（淘宝）': 'npmmirror (Taobao)',
+  '腾讯云镜像': 'Tencent mirror',
+  '清华 TUNA 镜像': 'Tsinghua TUNA mirror',
+  '确认重置？本地覆盖配置（接口地址、技能目录等）将被删除': 'Reset confirmed? Local config overrides (API base, skills dir, …) will be deleted',
+  '已重置': 'Reset done',
+  'CLI 入口': 'CLI entry',
+  '（仅 PATH，未找到内置入口）': '(PATH only — bundled entry not found)',
+  '插件版本': 'Plugin version',
+  '运行环境': 'Runtime',
+  '平台': 'Platform',
+  '代理环境': 'Proxy env',
+  '复制诊断信息': 'Copy diagnostics',
+  '诊断信息已复制': 'Diagnostics copied',
+  '暂无操作记录': 'No operations yet',
+  '成功': 'OK',
+  '失败': 'Failed',
+  '复制': 'Copy',
+  '示例：@scope/pkg、npm install pkg、dsh plugin --profile web add pkg': 'e.g. @scope/pkg, npm install pkg, dsh plugin --profile web add pkg',
   '（预检已跳过）': ' (precheck skipped)',
 };
 
@@ -356,7 +449,11 @@ function VersionBadge() {
         setNote(d.lastLine || d.phase || tr('升级中…'));
         continue;
       }
-      if (d.error) { setErr(tr('升级失败：') + d.error); return; }
+      if (d.error) {
+        // 日志文件路径随状态一起给：远程排查时用户直接把文件发回来
+        setErr(tr('升级失败：') + d.error + (d.logPath ? ' ' + tr('失败详情已记录，可把该文件发给开发者排查：') + d.logPath : ''));
+        return;
+      }
       // 升级只落了磁盘：**必须重启 DSH 才生效**，所以这里同时给出平台相关的手动步骤
       if (d.runtime) setRuntime(d.runtime);
       if (typeof d.canAutoRestart === 'boolean') setCanAuto(d.canAutoRestart);
@@ -632,6 +729,9 @@ const CSS = `
 .btm-entry-btn span{white-space:nowrap;overflow:hidden}
 .btm-toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);z-index:60;max-width:min(420px,86vw);padding:9px 15px;border-radius:10px;border:1px solid var(--dsw-alias-border-l2,#e2e4e8);background:var(--dsw-alias-bg-layer-1,#f5f6f8);color:var(--dsw-alias-label-secondary,#4b5058);font:inherit;font-size:13px;line-height:20px;box-shadow:var(--dsw-shadow-lv2,0 6px 20px rgb(20 24 32 / 12%))}
 .btm-page{position:fixed;z-index:40;box-sizing:border-box;display:flex;flex-direction:column;min-height:0;overflow:hidden;background:var(--dsw-alias-bg-base,#fff);color:var(--dsw-alias-label-primary,#17191c)}
+.btm-brand{display:inline-flex;align-items:center;flex:none;margin-right:2px;border-radius:6px;overflow:hidden}
+.btm-brand img{display:block;width:22px;height:22px;object-fit:cover;border-radius:6px}
+.btm-brand:hover{box-shadow:0 0 0 2px var(--dsw-alias-border-l1,#cfd2d8)}
 .btm-top{display:flex;align-items:center;gap:16px;flex:none;padding:10px 20px;border-bottom:1px solid var(--dsw-alias-border-l2,#e2e4e8);background:var(--dsw-alias-bg-base,#fff)}
 .btm-top-title{font-size:14px;font-weight:600;color:var(--dsw-alias-label-primary,#17191c)}
 .btm-close{margin-left:auto;width:32px;height:32px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2,#d1d5db);background:var(--dsw-alias-bg-layer-3,#fff);color:var(--dsw-alias-label-secondary,#4b5563);font:inherit;font-size:18px;line-height:1;cursor:pointer}
@@ -666,6 +766,92 @@ const CSS = `
 .btm-card-profile{padding:1px 6px;border-radius:999px;background:var(--dsw-alias-bg-layer-3,#fff);border:1px solid var(--dsw-alias-border-l2,#e2e4e8)}
 .btm-panel{display:flex;flex-direction:column;flex:1;min-height:0;color:var(--dsw-alias-label-primary,inherit);font:inherit}
 .btm-toolbar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:8px}
+/* 自定义安装输入行：与工具栏同排布，视觉上从属它 */
+.btm-custom-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:0 0 8px;padding:8px;border-radius:10px;background:var(--dsw-alias-bg-layer-2,#f3f4f6);border:1px dashed var(--dsw-alias-border-l2,#e2e4e8)}
+/* 自定义安装：独立区块（标题 + 说明 + 输入），不做成工具栏里的小按钮 */
+.btm-custom{display:flex;flex-direction:column;gap:8px;margin:0 0 10px;padding:12px;border-radius:10px;background:var(--dsw-alias-bg-layer-2,#f8f9fa);border:1px solid var(--dsw-alias-border-l2,#e2e4e8)}
+.btm-custom-title{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:var(--dsw-alias-label-primary,inherit)}
+.btm-custom-desc{margin:0;font-size:11px;line-height:17px;color:var(--dsw-alias-label-tertiary,#7b8088)}
+.btm-custom-hint{margin:0;font-size:10px;line-height:16px;color:var(--dsw-alias-label-tertiary,#9aa0a6)}
+/* 设置页配置表单 */
+.btm-set-form{display:flex;flex-direction:column;gap:8px;margin:10px 0}
+.btm-set-form label{display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--dsw-alias-label-tertiary,#7b8088)}
+.btm-input{width:100%;box-sizing:border-box;padding:6px 8px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2,#e2e4e8);background:var(--dsw-alias-bg-layer-3,#fff);color:inherit;font:inherit;font-size:12px}
+/* 设置布局：左侧图标导航 + 右侧内容（对齐 dsh-plugin） */
+.btm-set-body{display:flex;gap:14px;align-items:flex-start;margin-top:12px}
+.btm-set-side{display:flex;flex-direction:column;gap:2px;flex:none;width:128px}
+.btm-set-side-btn{display:flex;align-items:center;gap:8px;appearance:none;font:inherit;font-size:12px;padding:7px 10px;border-radius:8px;border:0;background:transparent;color:var(--dsw-alias-label-secondary,#4b5058);cursor:pointer;text-align:left}
+.btm-set-side-btn:hover{background:var(--dsw-alias-interactive-bg-hover,#f3f4f6)}
+.btm-set-side-btn.on{background:var(--dsw-alias-state-business-tertiary,#eef2ff);color:var(--dsw-alias-state-business-primary,#4d6bfe);font-weight:600}
+.btm-set-side-ic{display:inline-flex;width:16px;height:16px;flex:none;color:currentColor}
+.btm-set-side-ic svg{width:16px;height:16px;display:block}
+.btm-set-content{flex:1;min-width:0}
+.btm-set-pagetitle{font-size:15px;font-weight:600;color:var(--dsw-alias-label-primary,inherit)}
+.btm-set-pagedesc{margin:2px 0 10px;font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary,#7b8088)}
+@media (max-width:560px){.btm-set-body{flex-direction:column}.btm-set-side{flex-direction:row;flex-wrap:wrap;width:auto}}
+/* 分区内容容器 */
+.btm-set-page{display:flex;flex-direction:column;gap:8px;margin-top:6px}
+/* 开关行：label + checkbox 同行 */
+.btm-set-toggle{flex-direction:row!important;align-items:center;gap:8px!important}
+.btm-set-toggle input{width:auto}
+/* 日志失败徽标（红） */
+.btm-badge.is-failed{background:var(--dsw-alias-state-error-tertiary,#fef2f2);color:var(--dsw-alias-state-error-primary,#b91c1c)}
+/* 连通性探测区 */
+.btm-probe{display:flex;flex-direction:column;gap:6px;margin-top:12px;padding:10px;border-radius:10px;background:var(--dsw-alias-bg-layer-2,#f8f9fa);border:1px solid var(--dsw-alias-border-l2,#e2e4e8)}
+.btm-probe-head{display:flex;align-items:center;justify-content:space-between;font-size:12px;font-weight:600}
+.btm-probe-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px}
+.btm-probe-row{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:8px;background:var(--dsw-alias-bg-layer-3,#fff);font-size:11px;min-width:0}
+.btm-probe-dot{width:8px;height:8px;border-radius:50%;flex:none;background:#c7ccd4}
+.btm-probe-row.ok .btm-probe-dot{background:var(--dsw-alias-state-success-primary,#279c62)}
+.btm-probe-row.fail .btm-probe-dot{background:var(--dsw-alias-state-error-primary,#dc2626)}
+.btm-probe-row.running .btm-probe-dot{background:#f5b642;animation:btm-pulse 1s infinite}
+@keyframes btm-pulse{50%{opacity:.35}}
+.btm-probe-name{flex:none;font-weight:600}
+.btm-probe-addr{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-tertiary,#9aa0a6)}
+.btm-probe-ms{flex:none;color:var(--dsw-alias-label-tertiary,#7b8088)}
+/* 日志筛选行 */
+.btm-logbar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:8px}
+.btm-logbar-sel{width:auto;flex:none;min-width:88px}
+.btm-logbar-q{flex:1;min-width:100px;width:auto}
+/* 筛选 chip 组（对齐 dsh-plugin 的 chip 式双轴筛选） */
+.btm-chips{display:flex;flex-wrap:wrap;gap:4px;margin:0 0 4px}
+.btm-chip{appearance:none;font:inherit;font-size:11px;padding:3px 9px;border-radius:999px;border:1px solid var(--dsw-alias-border-l2,#e2e4e8);background:transparent;color:var(--dsw-alias-label-secondary,#4b5058);cursor:pointer}
+.btm-chip:hover{background:var(--dsw-alias-interactive-bg-hover,#f3f4f6)}
+.btm-chip.on{background:var(--dsw-alias-state-business-primary,#4d6bfe);border-color:var(--dsw-alias-state-business-primary,#4d6bfe);color:#fff}
+.btm-chip.on.lv-error{background:var(--dsw-alias-state-error-primary,#dc2626);border-color:var(--dsw-alias-state-error-primary,#dc2626)}
+.btm-chip.on.lv-warn{background:var(--dsw-alias-state-warning-primary,#b45309);border-color:var(--dsw-alias-state-warning-primary,#b45309)}
+.btm-chip.on.lv-success{background:var(--dsw-alias-state-success-primary,#047857);border-color:var(--dsw-alias-state-success-primary,#047857)}
+/* 日志状态行 */
+.btm-logmeta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:4px 0 8px;font-size:11px}
+.btm-logmeta-count{flex:none;font-weight:600;color:var(--dsw-alias-label-secondary,#4b5058)}
+.btm-logmeta-path{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left;font-family:ui-monospace,Consolas,monospace;color:var(--dsw-alias-label-tertiary,#9aa0a6)}
+/* 日志行：固定列宽网格，扫读对齐（对齐 dsh-plugin 的查看器密度） */
+.btm-loglist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px;max-height:46vh;overflow:auto}
+/* 日志行（对齐 dsh-plugin 的 .entry）：flex 单行，固定项 flex:none、消息项 flex:1。
+   🔴 不能用 grid + 固定列宽：面板窄时列宽总和超过容器会横向溢出，文本被挤成竖排。 */
+.btm-logrow{display:flex;align-items:baseline;gap:8px;padding:5px 8px;border-radius:6px;min-width:0;font-size:11px;line-height:16px;background:var(--dsw-alias-bg-layer-2,#f8f9fa)}
+.btm-log-event{flex:none;font-family:ui-monospace,Consolas,monospace;font-size:10.5px;color:var(--dsw-alias-label-tertiary,#9aa0a6);white-space:nowrap}
+/* 查看器里的高版列表（弹窗内滚动更长） */
+.btm-loglist-tall{max-height:52vh}
+.btm-logrow:hover{background:var(--dsw-alias-interactive-bg-hover,#eef1f5)}
+.btm-logrow.error{background:var(--dsw-alias-state-error-tertiary,#fef2f2)}
+.btm-logrow.warn{background:var(--dsw-alias-state-warning-tertiary,#fffbeb)}
+.btm-log-time{flex:none;font-family:ui-monospace,Consolas,monospace;font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-tertiary,#7b8088);white-space:nowrap}
+.btm-log-cat{flex:none;color:var(--dsw-alias-label-tertiary,#7b8088);white-space:nowrap}
+.btm-log-msg{flex:1;min-width:0;color:var(--dsw-alias-label-secondary,#4b5058);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* 日志级别徽标 */
+.btm-log-lv{flex:none;padding:1px 6px;border-radius:999px;font-size:10px;background:var(--dsw-alias-bg-layer-2,#f3f4f6);color:var(--dsw-alias-label-secondary,#4b5058)}
+.btm-log-lv.success{background:var(--dsw-alias-state-success-tertiary,#ecfdf5);color:var(--dsw-alias-state-success-primary,#047857)}
+.btm-log-lv.error{background:var(--dsw-alias-state-error-tertiary,#fef2f2);color:var(--dsw-alias-state-error-primary,#b91c1c)}
+.btm-log-lv.warn{background:var(--dsw-alias-state-warning-tertiary,#fffbeb);color:var(--dsw-alias-state-warning-primary,#b45309)}
+/* 日志查看器弹层：宽版 + 等宽字体滚动区 */
+.btm-logviewer{width:min(860px,92vw)}
+.btm-logpre{margin:0;padding:12px;font:11px/1.55 ui-monospace,Consolas,monospace;white-space:pre-wrap;word-break:break-all;background:var(--dsw-alias-bg-layer-2,#f8f9fa);border-radius:8px;max-height:60vh;overflow:auto}
+/* 已安装卡片：按钮行绝不换行（换行会让卡片高低不齐）——按钮改紧凑尺寸，4 个一行放得下 */
+.btm-installed .btm-card-actions{flex-wrap:nowrap}
+.btm-installed .btm-card-actions .btm-btn{min-height:26px;padding:0 9px;font-size:11px}
+.btm-installed .btm-card-actions .btm-btn.btm-btn-icon{min-height:26px;width:26px}
+.btm-installed .btm-card-actions .btm-card-details{flex:1 1 auto}
 .btm-tabs{display:flex;gap:4px}
 .btm-tab{padding:4px 10px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2,#e5e7eb);background:var(--dsw-alias-bg-layer-2,#f8fafc);color:var(--dsw-alias-label-secondary,inherit);font:inherit;font-size:12px;cursor:pointer}
 .btm-tab.active{color:var(--dsw-alias-state-success-primary,#047857);border-color:var(--dsw-alias-state-success-primary,#047857);background:var(--dsw-alias-state-success-tertiary,#ecfdf5)}
@@ -690,6 +876,8 @@ const CSS = `
 .btm-card-name{font-size:14px;font-weight:600;line-height:20px;color:var(--dsw-alias-label-primary,inherit);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .btm-card-fullname{font-size:11px;line-height:16px;flex:none;color:var(--dsw-alias-label-tertiary,#7b8088);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .btm-badge{align-self:center;flex:none;padding:1px 7px;border-radius:999px;font-size:10px;background:var(--dsw-alias-state-success-tertiary,#ecfdf5);color:var(--dsw-alias-state-success-primary,#047857)}
+/* 可更新徽标：琥珀色系，与已安装（绿）区分 */
+.btm-badge.is-update{background:var(--dsw-alias-state-warning-tertiary,#fffbeb);color:var(--dsw-alias-state-warning-primary,#b45309)}
 .btm-card-desc{flex:none;margin:10px 0 0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary,#7b8088)}
 .btm-card-foot{display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex:none;margin-top:auto;padding-top:12px;font-size:11px;line-height:17px;color:var(--dsw-alias-label-tertiary,#7b8088)}
 .btm-card-cat{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--dsw-alias-label-tertiary,#7b8088)}
@@ -697,7 +885,7 @@ const CSS = `
 .btm-card-stats>span{flex:none;white-space:nowrap}
 /* 操作区独立成行 + 上分割线：详情在左（文字链接，非按钮），安装/状态在右 */
 .btm-card-actions{display:flex;align-items:center;gap:8px;flex:none;margin-top:10px;padding-top:10px;border-top:1px solid var(--dsw-alias-border-l2,#e2e4e8)}
-.btm-card-details{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:0;padding:0;border:0;background:transparent;color:var(--dsw-alias-label-secondary,#4b5058);font:inherit;font-size:12px;font-weight:500;line-height:18px;text-align:left;text-decoration:none;cursor:pointer}
+.btm-card-details{flex:1 1 64px;min-width:64px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:0;padding:0;border:0;background:transparent;color:var(--dsw-alias-label-secondary,#4b5058);font:inherit;font-size:12px;font-weight:500;line-height:18px;text-align:left;text-decoration:none;cursor:pointer}
 .btm-card-details:hover{color:var(--dsw-alias-state-business-primary,#4d6bfe);text-decoration:underline}
 .btm-btn{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;min-height:30px;padding:0 12px;border-radius:8px;border:1px solid var(--dsw-alias-accent,#475569);background:var(--dsw-alias-accent,#475569);color:#fff;font:inherit;font-size:12px;cursor:pointer}
 .btm-btn:hover{filter:brightness(1.08)}
@@ -709,6 +897,12 @@ const CSS = `
 .btm-btn.ghost:hover{background:var(--dsw-alias-interactive-bg-hover,#f3f4f6);filter:none}
 /* 已安装：位置不动，靠文案 + 成功色表达状态 */
 .btm-btn.done{background:transparent;border-color:transparent;color:var(--dsw-alias-state-success-primary,#047857);cursor:default;opacity:1}
+/* 方形图标按钮（文件夹定位等）：与文字按钮同高，只占一个图标位 */
+.btm-btn.btm-btn-icon{min-height:30px;width:30px;padding:0}
+/* 无框纯图标按钮（文件夹定位）：彩色图形自表达，尺寸锁 26 与紧凑按钮同高 */
+.btm-btn-icononly{appearance:none;display:inline-flex;align-items:center;justify-content:center;width:26px;min-height:26px;padding:0;border:0;background:transparent;cursor:pointer;border-radius:6px;flex:none}
+.btm-btn-icononly:hover{background:var(--dsw-alias-interactive-bg-hover,#f3f4f6)}
+.btm-btn-icononly svg{display:block}
 .btm-btn.done:hover{filter:none}
 .btm-spec{flex:none;margin:6px 0 0;font-size:10px;line-height:14px;color:var(--dsw-alias-label-caption,#6b7280);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .btm-installed{display:flex;flex-direction:column;flex:1;min-height:0}
@@ -757,6 +951,11 @@ const CSS = `
 /* ---------- 设置页 ---------- */
 .btm-settings{display:flex;flex-direction:column;gap:10px}
 .btm-set-head{display:flex;flex-direction:column;gap:2px}
+.btm-set-title{cursor:pointer;-webkit-user-select:none;user-select:none}
+/* 设置页提示浮层：固定卡片右下，3 秒自动消失 */
+.btm-toastbox{position:fixed;right:28px;bottom:28px;z-index:9999;width:fit-content;max-width:min(420px,80vw);padding:9px 14px;border-radius:10px;font-size:12px;line-height:18px;background:var(--dsw-alias-state-success-tertiary,#ecfdf5);color:var(--dsw-alias-state-success-primary,#047857);border:1px solid color-mix(in srgb,var(--dsw-alias-state-success-primary,#047857) 25%,transparent);box-shadow:var(--dsw-shadow-lv1,0 2px 8px rgb(20 24 32 / 8%));animation:btm-toast-in .18s ease-out}
+.btm-toastbox.is-error{background:var(--dsw-alias-state-error-tertiary,#fef2f2);color:var(--dsw-alias-state-error-primary,#b91c1c);border-color:color-mix(in srgb,var(--dsw-alias-state-error-primary,#b91c1c) 25%,transparent)}
+@keyframes btm-toast-in{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
 .btm-set-title{margin:0;font-size:13px;font-weight:600;line-height:20px;color:var(--dsw-alias-label-primary,#17191c)}
 .btm-set-desc{font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary,#7b8088)}
 .btm-set-kv li{font-size:11px}
@@ -784,6 +983,9 @@ const CSS = `
    单元格里，text-align:center 只管文字、不管盒子位置 ⇒ 文字靠左。
    正确做法是让它跨满整行（grid-column:1/-1）再自身文字居中。 */
 .btm-empty{grid-column:1/-1;padding:40px 0;text-align:center;font-size:12px;color:var(--dsw-alias-label-caption,#6b7280)}
+/* 加载更多按钮行 + 尽头提示 */
+.btm-more{display:flex;justify-content:center;padding:14px 0 6px}
+.btm-end{padding:18px 0 26px;text-align:center;font-size:12px;color:var(--dsw-alias-label-tertiary,#9aa0a6)}
 .btm-loading,.btm-error{padding:12px 0;text-align:center;font-size:12px;color:var(--dsw-alias-label-caption,#6b7280)}
 .btm-error{color:var(--dsw-alias-state-danger-primary,#b91c1c)}
 .btm-banner{display:flex;align-items:center;gap:8px;padding:8px 10px;margin-bottom:8px;border-radius:10px;font-size:12px;background:var(--dsw-alias-state-success-tertiary,#ecfdf5);color:var(--dsw-alias-state-success-primary,#047857)}
@@ -1440,8 +1642,9 @@ function InstalledView({ kind, keyword = '', installStatus, onChanged, onNeedRes
   const tr = useTr();
   const [state, setState] = useState({ status: 'loading', items: [] });
   const [detail, setDetail] = useState(null); // 当前打开详情的条目
-  const [busyKey, setBusyKey] = useState(null); // 卸载中
+  const [busyKey, setBusyKey] = useState(null); // 卸载/更新中
   const [uninstallErr, setUninstallErr] = useState('');
+  const [latestMap, setLatestMap] = useState(() => new Map()); // pkg -> { latest, hasUpdate }
   const wasActiveRef = useRef(false);
   // 回调放 ref：父组件传的是内联箭头函数，写进 useCallback 依赖会让 load 每渲染都变 → 无限循环
   const onChangedRef = useRef(onChanged);
@@ -1452,6 +1655,12 @@ function InstalledView({ kind, keyword = '', installStatus, onChanged, onNeedRes
     if (err) {
       setState({ status: 'error', items: [] });
       return;
+    }
+    // 插件：同时拉线上 latest 表，驱动「可更新」标签（失败静默，标签不亮即可）
+    if (kind !== 'skills') {
+      api('pluginLatestVersions').then(([, vd]) => {
+        if (vd && vd.items) setLatestMap(new Map(vd.items.map((x) => [x.pkg, x])));
+      });
     }
     const items =
       kind === 'skills'
@@ -1493,6 +1702,26 @@ function InstalledView({ kind, keyword = '', installStatus, onChanged, onNeedRes
     }
     wasActiveRef.current = active;
   }, [installStatus, load]);
+
+  // 更新单插件：宿主端以 pkg@latest 走 add，绕开 pnpm 对已存在依赖的幂等空转
+  const updatePlugin = async (item) => {
+    setUninstallErr('');
+    setBusyKey(item.key);
+    const [err] = await api('pluginUpdate', { pkg: item.pkg, profile: item.profile });
+    if (err) {
+      setBusyKey(null);
+      setUninstallErr(err);
+      return;
+    }
+    // 异步任务交给轮询收尾；结束后 load() 会重拉 latest 表
+    if (onNeedRestart) onNeedRestart();
+  };
+
+  // 在系统文件管理器中定位插件目录（explorer /select, / Finder -R / xdg-open）
+  const revealPlugin = async (item) => {
+    const [err] = await api('pluginReveal', { pkg: item.pkg, profile: item.profile });
+    if (err) setUninstallErr(err);
+  };
 
   const uninstall = async (item) => {
     if (!window.confirm(tr('确认卸载 {name}？', { name: item.name }))) return;
@@ -1550,13 +1779,21 @@ function InstalledView({ kind, keyword = '', installStatus, onChanged, onNeedRes
                 <span className="btm-card-name">{it.name}</span>
                 <span className="btm-card-fullname">{it.extra}</span>
               </div>
-              <span className="btm-badge">{tr('已安装')}</span>
             </div>
             <p className="btm-card-desc">{it.description || (kind === 'skills' ? '' : tr('暂无描述'))}</p>
 
             {/* 缓存/体积等 Meta 行 */}
             <div className="btm-card-meta">
               {it.version ? <span className="btm-card-profile">{fmtVer(it.version)}</span> : null}
+              {/* 「可更新」放 meta 行与版本号并排：头部整行留给标题，避免名称被徽标挤没 */}
+              {kind !== 'skills' && latestMap.get(it.pkg) && latestMap.get(it.pkg).hasUpdate ? (
+                <span
+                  className="btm-badge is-update"
+                  title={tr('当前 {a} → 最新 {b}', { a: it.version, b: latestMap.get(it.pkg).latest })}
+                >
+                  {tr('可更新')}
+                </span>
+              ) : null}
               {kind === 'skills' ? (
                 <>
                   {it.files != null ? <span>{tr('{n} 个文件', { n: it.files })}</span> : null}
@@ -1578,6 +1815,30 @@ function InstalledView({ kind, keyword = '', installStatus, onChanged, onNeedRes
               <button type="button" className="btm-card-details" onClick={() => setDetail(it)}>
                 {kind === 'skills' ? tr('技能详情') : tr('插件说明')}
               </button>
+              {kind !== 'skills' ? (
+                <button
+                  type="button"
+                  className="btm-btn-icononly"
+                  onClick={() => revealPlugin(it)}
+                  title={tr('在文件夹中显示')}
+                  aria-label={tr('在文件夹中显示')}
+                >
+                  <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
+                    <path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4.2l1.8 2h9A1.5 1.5 0 0 1 21 8.5V18a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18z" fill="#f5b642" />
+                    <path d="M3 9.2h18v1.3H3z" fill="#e09b2d" />
+                  </svg>
+                </button>
+              ) : null}
+              {kind !== 'skills' && latestMap.get(it.pkg) && latestMap.get(it.pkg).hasUpdate ? (
+                <button
+                  type="button"
+                  className="btm-btn primary"
+                  disabled={busyKey === it.key || !!(installStatus && installStatus.active)}
+                  onClick={() => updatePlugin(it)}
+                >
+                  {busyKey === it.key ? tr('更新中…') : tr('更新')}
+                </button>
+              ) : null}
               <button
                 type="button"
                 className="btm-btn danger"
@@ -1631,7 +1892,16 @@ function MarketPanel({ ctx }) {
   const [activeCategory, setActiveCategory] = useState('');
   const [sort, setSort] = useState('stars');
   const [scope, setScope] = useState('all'); // all | installed
-  const [skillCategory, setSkillCategory] = useState(''); // 技能分类（客户端过滤）
+  const [skillCategory, setSkillCategory] = useState(''); // 技能分类（服务端 categoryId，'' = 全部）
+  const [skillCats, setSkillCats] = useState([]); // 服务端分类 Tab（skillSearch 响应带出）
+  // 分页：插件 page / 技能 offset；hasMore 由响应判断；end 仅在「点了加载更多但没有新数据」时置位
+  const [pluginPage, setPluginPage] = useState(1);
+  const [pluginHasMore, setPluginHasMore] = useState(true);
+  const [pluginEnd, setPluginEnd] = useState(false);
+  const [skillOffset, setSkillOffset] = useState(0);
+  const [skillHasMore, setSkillHasMore] = useState(true);
+  const [skillEnd, setSkillEnd] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [skillDetail, setSkillDetail] = useState(null); // 技能详情弹层
   const [plugins, setPlugins] = useState([]);
   const [skills, setSkills] = useState([]);
@@ -1642,6 +1912,8 @@ function MarketPanel({ ctx }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [installing, setInstalling] = useState(null);
+  const [customOpen, setCustomOpen] = useState(false); // 自定义安装输入框
+  const [customTarget, setCustomTarget] = useState('');
   const [status, setStatus] = useState(null);
   const [restartHint, setRestartHint] = useState(false);
   const [restartBusy, setRestartBusy] = useState(false);
@@ -1655,34 +1927,74 @@ function MarketPanel({ ctx }) {
   const locale = ctx?.injects?.find?.((i) => i?.locale)?.locale;
   const t = useTr(); // 跟随 Harness 中英文（详见 i18n 区）
 
-  const loadPlugins = useCallback(async () => {
-    setLoading(true);
+  /**
+   * @param page 1 = 首屏（替换列表并重置尽头提示）；>1 = 加载更多（追加）
+   */
+  const loadPlugins = useCallback(async (page = 1) => {
+    if (page === 1) { setLoading(true); setPluginEnd(false); } else { setLoadingMore(true); }
     setError('');
     const [err, data] = await api('plugins', {
       q: keyword,
       category: activeCategory || undefined,
       sort,
-      page: 1,
-      pageSize: 48,
+      page,
+      pageSize: 24,
     });
     if (err) setError(t('加载失败：') + err);
-    else setPlugins(data.items || []);
+    else {
+      const fresh = data.items || [];
+      // 插件接口不返回 hasMore：page*pageSize < total 即还有下一页
+      let more = page * 24 < (Number(data.total) || 0);
+      if (page === 1) {
+        setPlugins(fresh);
+      } else if (!fresh.length) {
+        // 点了加载更多但一无所获：这就是边界（首屏不足不进这个分支）
+        setPluginEnd(true);
+        more = false;
+      } else {
+        setPlugins((prev) => [...prev, ...fresh]);
+        // 本次加载的就是最后一批（之后没有更多）：立即提示，而不是等一次注定落空的点击
+        if (!more) setPluginEnd(true);
+      }
+      setPluginHasMore(more);
+    }
+    setPluginPage(page);
     setLoading(false);
+    setLoadingMore(false);
   }, [keyword, activeCategory, sort]);
 
-  const loadSkills = useCallback(async () => {
-    setLoading(true);
+  /** @param offset 0 = 首屏（替换 + 重置提示）；>0 = 加载更多（追加） */
+  const loadSkills = useCallback(async (offset = 0) => {
+    if (offset === 0) { setLoading(true); setSkillEnd(false); } else { setLoadingMore(true); }
     setError('');
-    const [err, data] = await api('skillSearch', { query: keyword, limit: 48, offset: 0 });
-    const [, listData] = await api('skillList');
-    const installedSet = new Set((listData?.items || []).map((it) => it.slug));
-    setInstalledSlugs(installedSet);
-    setInstalledSkillCount((listData?.items || []).length);
+    const [err, data] = await api('skillSearch', {
+      query: keyword,
+      limit: 24,
+      offset,
+      categoryId: skillCategory || undefined,
+    });
+    if (data && Array.isArray(data.categories)) setSkillCats(data.categories);
     if (err) setError(t('加载失败：') + err);
-    else
-      setSkills(data.items || []);
+    else {
+      const fresh = data.items || [];
+      let more = !!data.hasMore;
+      if (offset === 0) {
+        setSkills(fresh);
+      } else if (!fresh.length) {
+        // 点了加载更多但一无所获：这就是边界（首屏不足不进这个分支）
+        setSkillEnd(true);
+        more = false;
+      } else {
+        setSkills((prev) => [...prev, ...fresh]);
+        // 本次就是最后一批：立即提示，不让用户再点一次空按钮
+        if (!more) setSkillEnd(true);
+      }
+      setSkillHasMore(more);
+    }
+    setSkillOffset(offset);
     setLoading(false);
-  }, [keyword]);
+    setLoadingMore(false);
+  }, [keyword, skillCategory]);
 
   useEffect(() => {
     if (tab === 'plugins') loadPlugins();
@@ -1732,7 +2044,7 @@ function MarketPanel({ ctx }) {
         // 安装结束（active true→false）：有错误则展示，否则刷新列表让「已安装」生效
         if (wasActiveRef.current && !data.active) {
           setInstalling(null);
-          if (data.error) setError(t('安装失败：') + data.error);
+          if (data.error) setError(t('安装失败：') + data.error + (data.logPath ? ' ' + t('失败详情已记录，可把该文件发给开发者排查：') + data.logPath : ''));
           else {
             setRestartHint(true);
             loadPlugins();
@@ -1779,6 +2091,30 @@ function MarketPanel({ ctx }) {
     // 清空一律交给轮询的收尾分支 —— 否则按钮提前恢复会让用户重复点击。
   };
 
+  // 自定义安装：裸包名 / npm|pnpm 命令 / 完整 dsh 命令（宿主端 parseCustomTarget 校验）
+  const customInstall = async () => {
+    const raw = String(customTarget || '').trim();
+    if (!raw) return;
+    setInstalling(raw);
+    setError('');
+    errorAtClickRef.current = (status && status.error) || null;
+    const [err, data] = await api('pluginCustomInstall', { target: raw });
+    if (err) {
+      if (/已有安装任务/.test(err)) return;
+      setInstalling(null);
+      setError(t('安装失败：') + err);
+      return;
+    }
+    if (data && data.ok === false) {
+      setInstalling(null);
+      setError(t('无法识别的安装目标') + '：' + String(data.error || ''));
+      return;
+    }
+    setCustomOpen(false);
+    setCustomTarget('');
+    // 受理后进度交给轮询；结束时 loadPlugins() 让卡片就位
+  };
+
   const installSkill = async (skill) => {
     setInstalling(skill.slug);
     setError('');
@@ -1802,9 +2138,7 @@ function MarketPanel({ ctx }) {
     else if (data && data.manual) setError(manualRestartHint(t, data.runtime));
   };
 
-  // 技能分类：从已加载数据里取真实 category（接口不提供分类列表，也不支持按分类查询）
-  const skillCats = [...new Set(skills.map((s) => String(s.category || '').trim()).filter(Boolean))].sort();
-  const visibleSkills = skillCategory ? skills.filter((s) => String(s.category || '').trim() === skillCategory) : skills;
+  // 技能分类已走服务端（categoryId 查询），不再客户端过滤；skills 即全部可见项
 
   return (
     <div className="btm-panel">
@@ -1833,6 +2167,45 @@ function MarketPanel({ ctx }) {
           </select>
         )}
       </div>
+      {/* 自定义安装：独立区块（带标题与说明），而不是挤在搜索/排序那一行的小按钮 */}
+      {tab === 'plugins' && scope === 'all' ? (
+        <div className="btm-custom">
+          <div className="btm-custom-title">
+            <span>{t('自定义安装')}</span>
+            <button
+              type="button"
+              className="btm-btn ghost"
+              style={{ marginLeft: 'auto' }}
+              onClick={() => setCustomOpen(!customOpen)}
+            >
+              {customOpen ? t('收起') : t('展开')}
+            </button>
+          </div>
+          <p className="btm-custom-desc">
+            {t('手动安装市场目录之外的插件：npm 包名、GitHub 仓库或本地路径。装完的条目会出现在「已安装」列表。')}
+          </p>
+          {customOpen ? (
+            <>
+              <div className="btm-custom-row">
+                <input
+                  className="btm-search"
+                  style={{ flex: '1 1 auto', minWidth: '160px' }}
+                  placeholder={t('示例：@scope/pkg、npm install pkg、dsh plugin --profile web add pkg')}
+                  value={customTarget}
+                  onChange={(e) => setCustomTarget(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') customInstall(); }}
+                />
+                <button type="button" className="btm-btn primary" disabled={!!installing} onClick={customInstall}>
+                  {installing ? t('安装中…') : t('安装')}
+                </button>
+              </div>
+              <p className="btm-custom-hint">
+                {t('示例：@scope/pkg、npm install pkg、dsh plugin --profile web add pkg')}
+              </p>
+            </>
+          ) : null}
+        </div>
+      ) : null}
 
       {/* 第二行：范围切换独立成行 —— 切到已安装时不会因搜索框/排序消失而左移 */}
       <ScopeSeg
@@ -1859,19 +2232,19 @@ function MarketPanel({ ctx }) {
         </div>
       )}
 
-      {/* 类目胶囊（技能页·全部视图）：百通搜索接口忽略 category 参数，这里按返回数据里的真实分类客户端过滤 */}
-      {tab === 'skills' && scope === 'all' && skillCats.length > 1 && (
+      {/* 类目胶囊（技能页·全部视图）：服务端分类（categoryId 查询），点击切换即重新加载第一页 */}
+      {tab === 'skills' && scope === 'all' && skillCats.length > 0 && (
         <div className="btm-cats">
           <button className={skillCategory === '' ? 'btm-cat active' : 'btm-cat'} onClick={() => setSkillCategory('')}>
             {t('全部')}
           </button>
           {skillCats.map((c) => (
             <button
-              key={c}
-              className={skillCategory === c ? 'btm-cat active' : 'btm-cat'}
-              onClick={() => setSkillCategory(c)}
+              key={c.id}
+              className={skillCategory === c.id ? 'btm-cat active' : 'btm-cat'}
+              onClick={() => setSkillCategory(c.id)}
             >
-              {c}
+              {t(c.name)}
             </button>
           ))}
         </div>
@@ -1913,6 +2286,7 @@ function MarketPanel({ ctx }) {
       ) : loading ? (
         <div className="btm-loading">{t('加载中…')}</div>
       ) : tab === 'plugins' ? (
+        <>
         <div className="btm-grid">
           {plugins.map((p) => (
             <PluginCard
@@ -1925,9 +2299,20 @@ function MarketPanel({ ctx }) {
           ))}
           {!plugins.length && <div className="btm-empty">{t('暂无插件')}</div>}
         </div>
+        {/* 加载更多：只有点了却没加载到新数据时才出现"边界"提示（首屏不足不显示） */}
+        {pluginHasMore && !loading ? (
+          <div className="btm-more">
+            <button type="button" className="btm-btn ghost" disabled={loadingMore} onClick={() => loadPlugins(pluginPage + 1)}>
+              {loadingMore ? t('正在加载…') : t('加载更多')}
+            </button>
+          </div>
+        ) : null}
+        {pluginEnd ? <div className="btm-end">{t('宇宙有没有边界人类尚未得知，我的边界被你探索到啦~')}</div> : null}
+        </>
       ) : (
+        <>
         <div className="btm-grid">
-          {visibleSkills.map((s) => (
+          {skills.map((s) => (
             <SkillCard
               key={s.slug}
               skill={s}
@@ -1936,8 +2321,17 @@ function MarketPanel({ ctx }) {
               installedSlugsSet={installedSlugs}
             />
           ))}
-          {!visibleSkills.length && <div className="btm-empty">{t('暂无技能')}</div>}
+          {!skills.length && <div className="btm-empty">{t('暂无技能')}</div>}
         </div>
+        {skillHasMore && !loading ? (
+          <div className="btm-more">
+            <button type="button" className="btm-btn ghost" disabled={loadingMore} onClick={() => loadSkills(skillOffset + 24)}>
+              {loadingMore ? t('正在加载…') : t('加载更多')}
+            </button>
+          </div>
+        ) : null}
+        {skillEnd ? <div className="btm-end">{t('宇宙有没有边界人类尚未得知，我的边界被你探索到啦~')}</div> : null}
+        </>
       )}
 
       {skillDetail ? (
@@ -2321,16 +2715,119 @@ function SimpleToolView(props) {
 /* ============================ 设置页：已安装技能 + 一键更新 ============================ */
 
 /**
+ * 自动消失的浮动提示（设置页用）。
+ *
+ * 为什么不用原来的 <p className="btm-status">：它挂在卡片流末尾，位置跟着内容跑、
+ * 弹在分区底部，用户填完表单得往下找；而且不消失，像常驻错误。
+ * 这里固定浮在卡片右下，3 秒自动收起 —— 反馈与"是否还在"解耦。
+ */
+function AutoToast({ text, onDone, kind }) {
+  useEffect(() => {
+    if (!text) return undefined;
+    const id = setTimeout(onDone, 3000);
+    return () => clearTimeout(id);
+  }, [text, onDone]);
+  if (!text) return null;
+  return (
+    <div className={'btm-toastbox' + (kind === 'error' ? ' is-error' : '')} role="status">
+      {text}
+    </div>
+  );
+}
+
+/* ============================ 系统日志常量（对齐 dsh-plugin 的 LogsModal） ============================ */
+
+/** 类别筛选/徽章文案（值 → i18n key），与宿主 oplog 的 LogCategory 一一对应 */
+const CAT_TEXT = {
+  install: '安装',
+  uninstall: '卸载',
+  update: '更新',
+  diagnostics: '诊断',
+  settings: '设置',
+  system: '系统',
+};
+const CAT_FILTERS = [
+  ['all', '全部类别'],
+  ['install', '安装'],
+  ['uninstall', '卸载'],
+  ['update', '更新'],
+  ['diagnostics', '诊断'],
+  ['settings', '设置'],
+  ['system', '系统'],
+];
+
+/** 级别文案与筛选顺序：错误优先暴露（排查时最常先看它） */
+const LEVEL_TEXT = { debug: '调试', info: '信息', success: '成功', warn: '警告', error: '错误' };
+const LEVEL_FILTERS = [
+  ['all', '全部级别'],
+  ['error', '错误'],
+  ['warn', '警告'],
+  ['success', '成功'],
+  ['info', '信息'],
+  ['debug', '调试'],
+];
+
+/** 精确到秒的时间（每条都带秒，排查时序问题必需；与 dsh-plugin fmtLogTime 同格式） */
+function formatLogTime(at) {
+  const d = new Date(Number(at) || 0);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+/* 设置导航图标（16px 线性，与 dsh-plugin 的设置分区视觉对齐） */
+const iconSvg = (paths) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    {paths.map((d, i) => <path key={i} d={d} />)}
+  </svg>
+);
+const SetGearIcon = () => iconSvg(['M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z', 'M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z']);
+const SetUpIcon = () => iconSvg(['M21 12a9 9 0 1 1-2.64-6.36', 'M21 3v6h-6']);
+const SetDiagIcon = () => iconSvg(['M3 12h4l2-7 4 14 2-7h6']);
+const SetLogIcon = () => iconSvg(['M8 6h13', 'M8 12h13', 'M8 18h13', 'M3 6h.01', 'M3 12h.01', 'M3 18h.01']);
+const SetRstIcon = () => iconSvg(['M3 12a9 9 0 1 0 3-6.7L3 8', 'M3 3v5h5']);
+
+/**
  * 注册到 DSH 设置页（settings.plugin.item）。
  * 展示配置摘要与已安装技能清单，支持单个/全部更新到远端当前版本。
  * ⚠️ 远端没有版本历史接口，「更新」= 用远端当前版本覆盖安装。
  */
 function SettingsCard(props) {
   const tr = useTr();
+  // 左侧导航分区：更新（插件+技能更新中心）/ 配置 / 诊断 / 操作日志 / 重置
+  const [section, setSection] = useState('updates');
   const [state, setState] = useState({ status: 'loading', items: [], updatable: 0, error: '' });
   const [cfg, setCfg] = useState(null);
+  const [form, setForm] = useState(null); // 可编辑配置：apiBase / skillsDir / timeoutMs / maxResults
+  const [saving, setSaving] = useState(false);
   const [busy, setBusy] = useState('');
   const [note, setNote] = useState('');
+  const [diag, setDiag] = useState(null);
+  const [logs, setLogs] = useState(null);
+  // 插件更新中心：已安装插件 + 线上 latest（updates 分区专用）
+  const [pluginsUpd, setPluginsUpd] = useState(null); // null = 未加载
+  const [pluginBusy, setPluginBusy] = useState('');
+  // 连通性探测（流式 NDJSON 渲染）：key -> {status, ms, status code, display}
+  const [probes, setProbes] = useState({});
+  const [probing, setProbing] = useState(false);
+  // 日志筛选与查看器
+  const [logCat, setLogCat] = useState('all');
+  const [logLevel, setLogLevel] = useState('all');
+  const [logQuery, setLogQuery] = useState('');
+  const [logOffset, setLogOffset] = useState(0);
+  const [logViewer, setLogViewer] = useState(null); // 安装日志全文弹窗 { id, text }
+  const [logsModal, setLogsModal] = useState(false); // 系统日志查看器（弹窗）
+  const [logMore, setLogMore] = useState(false);
+  // 「配置」菜单默认隐藏：在标题上 1.5 秒内连点 3 次显示；配置页内的开关可再次隐藏
+  const [showConfig, setShowConfig] = useState(false);
+  const tapRef = useRef({ count: 0, at: 0 });
+  // 提示条：note 为文本，noteSeq 变化时强制重挂（连续两次相同文案也能重新计时）
+  const [noteSeq, setNoteSeq] = useState(0);
+  const [noteKind, setNoteKind] = useState('info');
+  const flash = useCallback((text, kind) => {
+    setNote(text);
+    setNoteKind(kind || 'info');
+    setNoteSeq((n) => n + 1);
+  }, []);
 
   const load = useCallback(async () => {
     const [err, data] = await api('skillUpdates');
@@ -2344,9 +2841,206 @@ function SettingsCard(props) {
   useEffect(() => {
     load();
     api('config').then(([err, data]) => {
-      if (!err && data) setCfg(data);
+      if (!err && data) {
+        setCfg(data);
+        setForm({
+          apiBase: String(data.apiBase || ''),
+          skillsDir: String(data.skillsDir || ''),
+          timeoutMs: Number(data.timeoutMs) || 20000,
+          maxResults: Number(data.maxResults) || 12,
+          npmRegistry: String(data.npmRegistry || ''),
+          checkUpdatesOnStart: data.checkUpdatesOnStart !== false,
+        });
+      }
     });
   }, [load]);
+
+  /** 插件更新列表：已安装清单 × 线上 latest */
+  const loadPluginsUpd = useCallback(async () => {
+    const [, installed] = await api('installedPlugins');
+    const [, latest] = await api('pluginLatestVersions');
+    if (!installed) return;
+    const latestMap = new Map(((latest && latest.items) || []).map((x) => [x.pkg, x]));
+    setPluginsUpd(
+      (installed.items || []).map((it) => {
+        const l = latestMap.get(it.pkg);
+        return {
+          pkg: it.pkg,
+          profile: (it.profiles && it.profiles[0]) || it.profile || '',
+          name: it.name || it.pkg,
+          current: it.version || '',
+          latest: (l && l.latest) || '',
+          hasUpdate: !!(l && l.hasUpdate),
+        };
+      }),
+    );
+  }, []);
+
+  // 诊断 / 日志 / 插件更新按需拉（进对应分区才请求）
+  useEffect(() => {
+    if (section === 'diagnostics' && !diag) api('pluginDiagnostics').then(([, d]) => setDiag(d));
+    if (section === 'logs') loadLogs();
+    if (section === 'updates' && pluginsUpd === null) loadPluginsUpd();
+  }, [section]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** 更新单个插件：触发后轮询 pluginInstallStatus 直到结束，再刷新列表 */
+  const updatePluginOne = async (item) => {
+    if (pluginBusy) return;
+    setPluginBusy(item.pkg);
+    setNote('');
+    const [err] = await api('pluginUpdate', { pkg: item.pkg, profile: item.profile });
+    if (err) {
+      setPluginBusy('');
+      flash(tr('更新失败：') + err, 'error');
+      return;
+    }
+    // 轮询安装状态收尾（服务端异步执行 pnpm）
+    for (let i = 0; i < 600; i += 1) {
+      await new Promise((r) => setTimeout(r, 1500));
+      const [, st] = await api('pluginInstallStatus');
+      if (!st || !st.active) {
+        if (st && st.error) flash(tr('更新失败：') + st.error, 'error');
+        else flash(tr('更新完成，重启 DSH 后生效') + '：' + item.pkg);
+        break;
+      }
+    }
+    setPluginBusy('');
+    loadPluginsUpd();
+  };
+
+  /** 连通性探测：流式读 NDJSON，逐行更新状态；only 缺省 = 全量 */
+  const runProbes = useCallback(async (only) => {
+    if (probing) return;
+    setProbing(true);
+    setProbes((prev) => {
+      const next = { ...prev };
+      for (const k of ['npm', 'github', 'catalog']) {
+        if (!only || only === k) next[k] = { ...next[k], status: 'running', ms: null, code: null };
+      }
+      return next;
+    });
+    try {
+      const res = await fetch('/baitong-market/probe', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(only ? { key: only } : {}),
+      });
+      const reader = res.body && res.body.getReader();
+      if (!reader) return;
+      const decoder = new TextDecoder();
+      let buf = '';
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        let nl = buf.indexOf('\n');
+        while (nl !== -1) {
+          const line = buf.slice(0, nl).trim();
+          buf = buf.slice(nl + 1);
+          if (line) {
+            try {
+              const ev = JSON.parse(line);
+              setProbes((prev) => ({
+                ...prev,
+                [ev.key]: { status: ev.type, ms: ev.ms ?? null, code: ev.status ?? null, display: ev.display || '' },
+              }));
+            } catch { /* 半截行 */ }
+          }
+          nl = buf.indexOf('\n');
+        }
+      }
+    } catch {
+      /* 探测请求失败：行状态停在 running，用户可重试 */
+    } finally {
+      setProbing(false);
+    }
+  }, [probing]);
+
+  /**
+   * 结构化日志：带筛选分页。
+   * @param offset 0 = 重查第一页（替换）；>0 = 加载更多（追加）——对齐 dsh-plugin 的 offsetRef 累积
+   */
+  const loadLogs = useCallback(async (offset = 0, append = false) => {
+    const [, d] = await api('pluginLogs', {
+      offset,
+      limit: 50,
+      category: logCat,
+      level: logLevel,
+      query: logQuery || undefined,
+    });
+    if (d) {
+      if (append) {
+        setLogs((prev) => ({
+          ...d,
+          entries: [...((prev && prev.entries) || []), ...(d.entries || [])],
+        }));
+      } else {
+        setLogs(d);
+      }
+      setLogOffset(offset);
+    }
+  }, [logCat, logLevel, logQuery]);
+
+  /** 清空日志（对齐 dsh-plugin clear-log） */
+  const clearLogs = async () => {
+    if (!window.confirm(tr('确认清空所有日志？此操作不可撤销'))) return;
+    const [err] = await api('pluginLogClear');
+    if (err) {
+      flash(tr('清空失败：') + err, 'error');
+      return;
+    }
+    flash(tr('已清空'));
+    loadLogs(0);
+  };
+
+  // 进诊断页自动跑一轮探测
+  useEffect(() => {
+    if (section === 'diagnostics' && !Object.keys(probes).length) runProbes();
+  }, [section]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** 复制当前筛选的日志到剪贴板 */
+  const copyLogs = async () => {
+    if (!logs || !logs.entries) return;
+    const text = logs.entries
+      .map((e) => `[${formatTime(e.at)}] [${e.level}] [${e.category}] [${e.event}] ${e.message}`)
+      .join('\n');
+    try {
+      await navigator.clipboard.writeText(text);
+      flash(tr('已复制'));
+    } catch {
+      /* 剪贴板不可用：静默 */
+    }
+  };
+
+  /** 在系统文件管理器中定位日志文件 */
+  const revealLogFile = async () => {
+    const [, d] = await api('pluginLogReveal');
+    if (d && d.ok === false) flash(d.error || '', 'error');
+  };
+
+  /** 安装日志查看器：取单条 processLog 全文 */
+  const openLogViewer = async (id) => {
+    const [, d] = await api('pluginLogRead', { id });
+    if (d && d.ok !== false) setLogViewer({ id, text: String(d.text || '') });
+  };
+
+  /** 导出当前筛选的日志为 .log 文件 */
+  const exportLogs = () => {
+    if (!logs || !logs.entries) return;
+    const text = logs.entries
+      .map((e) => `[${formatTime(e.at)}] [${e.level}] [${e.category}] [${e.event}] ${e.message}`)
+      .join('\n');
+    if (!text) return;
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'baitong-market.log';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
 
   const updateOne = async (slug) => {
     setBusy(slug);
@@ -2354,10 +3048,10 @@ function SettingsCard(props) {
     const [err, data] = await api('skillUpdate', { slug });
     setBusy('');
     if (err || !data || data.ok === false) {
-      setNote(tr('更新失败：') + (err || (data && data.error) || ''));
+      flash(tr('更新失败：') + (err || (data && data.error) || ''), 'error');
       return;
     }
-    setNote(
+    flash(
       data.updated
         ? `${slug}: ${data.previousVersion || '—'} → ${data.version}`
         : tr('已是最新版本：') + slug,
@@ -2375,17 +3069,89 @@ function SettingsCard(props) {
     }
   };
 
-  const cfgRows = cfg
-    ? [
-        [tr('接口地址'), cfg.apiBase],
-        [tr('技能目录'), cfg.skillsDir],
-      ]
-    : [];
+  const resetCfg = async () => {
+    if (!window.confirm(tr('仅重置本插件（百通插件广场）的设置：更新策略、镜像源等恢复默认值，不影响 DSH 其他插件') + ' ' + tr('确认继续？'))) return;
+    setSaving(true);
+    const [err, data] = await api('pluginResetConfig');
+    setSaving(false);
+    if (err || !data || data.ok === false) {
+      flash(tr('重置失败：') + (err || (data && data.error) || ''), 'error');
+      return;
+    }
+    setCfg(data);
+    setForm({
+      apiBase: String(data.apiBase || ''),
+      skillsDir: String(data.skillsDir || ''),
+      timeoutMs: Number(data.timeoutMs) || 20000,
+      maxResults: Number(data.maxResults) || 12,
+      npmRegistry: String(data.npmRegistry || ''),
+      checkUpdatesOnStart: data.checkUpdatesOnStart !== false,
+    });
+    flash(tr('已重置'));
+    setShowConfig(false);
+    setSection('updates');
+  };
+
+  /**
+   * 标题连点触发：1.5 秒内累计 3 次即显示「配置」分区。
+   * 为什么用标题而不是别的元素：标题在任何分区都可见、可点，且用户不容易误触；
+   * 计数窗口过期即归零，避免「隔很久凑够三次」也算触发。
+   */
+  const onTitleTap = () => {
+    const now = Date.now();
+    const t = tapRef.current;
+    t.count = now - t.at > 1500 ? 1 : t.count + 1;
+    t.at = now;
+    if (t.count >= 3) {
+      t.count = 0;
+      setShowConfig(true);
+      setSection('config');
+      flash(tr('配置菜单已显示（再次连点标题三次可重新显示）'));
+    }
+  };
+
+  const copyDiag = async () => {
+    if (!diag) return;
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(diag, null, 2));
+      flash(tr('诊断信息已复制'));
+    } catch {
+      /* 剪贴板不可用：静默 */
+    }
+  };
+
+  const saveCfg = async () => {
+    if (!form) return;
+    setSaving(true);
+    setNote('');
+    const [err, data] = await api('config', { save: true, ...form });
+    setSaving(false);
+    if (err || !data || data.ok === false) {
+      flash(tr('保存失败：') + (err || (data && data.error) || ''), 'error');
+      return;
+    }
+    setCfg(data);
+    flash(tr('已保存'));
+  };
+
+  const SECTIONS = [
+    { key: 'updates', label: tr('更新'), desc: tr('已安装插件与技能的版本检查、一键更新，以及更新策略'), icon: <SetUpIcon /> },
+    { key: 'config', label: tr('配置'), desc: tr('数据源与运行参数'), icon: <SetGearIcon /> },
+    { key: 'diagnostics', label: tr('诊断'), desc: tr('环境快照：版本、运行时与 CLI 入口，排查安装问题用'), icon: <SetDiagIcon /> },
+    { key: 'logs', label: tr('操作日志'), desc: tr('最近 20 次安装 / 更新 / 卸载记录'), icon: <SetLogIcon /> },
+    { key: 'reset', label: tr('重置'), desc: tr('仅重置本插件（百通插件广场）的设置：更新策略、镜像源等恢复默认值，不影响 DSH 其他插件'), icon: <SetRstIcon /> },
+  ];
+  // 未显示时把「配置」从导航里摘掉；activeSection 用未过滤列表兜底，避免 section 停在隐藏项时崩溃
+  const visibleSections = SECTIONS.filter((s) => s.key !== 'config' || showConfig);
+  const activeSection = visibleSections.find((s) => s.key === section) ?? visibleSections[0];
 
   return (
     <div className="btm-settings">
       <div className="btm-set-head">
-        <h4 className="btm-set-title">{tr('百通技能与插件')}</h4>
+        {/* 标题即隐藏开关：连点 3 次显示「配置」菜单（见 onTitleTap） */}
+        <h4 className="btm-set-title" onClick={onTitleTap} title={tr('显示配置菜单')}>
+          {tr('百通技能与插件')}
+        </h4>
         <span className="btm-set-desc">
           {tr('已安装技能 {n} 个，其中 {m} 个可更新', {
             n: state.items.length,
@@ -2394,16 +3160,117 @@ function SettingsCard(props) {
         </span>
       </div>
 
-      {cfgRows.length ? (
-        <ul className="btm-kv btm-set-kv">
-          {cfgRows.map(([k, v]) => (
-            <li key={k}>
-              <span>{k}</span>
-              <b>{v || '—'}</b>
-            </li>
+      {/* 左侧图标导航 + 右侧内容（对齐 dsh-plugin 的设置布局） */}
+      <div className="btm-set-body">
+        <nav className="btm-set-side" role="tablist" aria-label={tr('设置')}>
+          {visibleSections.map((s) => (
+            <button
+              key={s.key}
+              type="button"
+              role="tab"
+              aria-selected={section === s.key}
+              className={'btm-set-side-btn' + (section === s.key ? ' on' : '')}
+              onClick={() => setSection(s.key)}
+            >
+              <span className="btm-set-side-ic">{s.icon}</span>
+              <span>{s.label}</span>
+            </button>
           ))}
-        </ul>
+        </nav>
+        <div className="btm-set-content">
+          <div className="btm-set-pagetitle">{activeSection.label}</div>
+          <div className="btm-set-pagedesc">{activeSection.desc}</div>
+
+      {section === 'updates' ? (
+        <>
+      {/* 更新策略：镜像源 + 启动检查（写 overlay，保存即生效） */}
+      {form ? (
+        <div className="btm-set-form">
+          <label>
+            <span>{tr('npm 镜像源')}</span>
+            <select
+              className="btm-input"
+              value={form.npmRegistry}
+              onChange={(e) => setForm({ ...form, npmRegistry: e.target.value })}
+            >
+              <option value="">{tr('未配置（跟随本机 npm）')}</option>
+              <option value="https://registry.npmjs.org">{tr('npm 官方源')}</option>
+              <option value="https://registry.npmmirror.com">{tr('npmmirror（淘宝）')}</option>
+              <option value="https://mirrors.cloud.tencent.com/npm/">{tr('腾讯云镜像')}</option>
+              <option value="https://mirrors.tuna.tsinghua.edu.cn/npm/">{tr('清华 TUNA 镜像')}</option>
+            </select>
+          </label>
+          <label className="btm-set-toggle">
+            <span>{tr('启动时检查更新')}</span>
+            <input
+              type="checkbox"
+              checked={form.checkUpdatesOnStart}
+              onChange={(e) => setForm({ ...form, checkUpdatesOnStart: e.target.checked })}
+            />
+          </label>
+          <button type="button" className="btm-btn primary" disabled={saving} onClick={saveCfg}>
+            {saving ? tr('保存中…') : tr('保存')}
+          </button>
+        </div>
       ) : null}
+
+      {/* 插件更新：current → latest + 更新按钮 */}
+      <div className="btm-probe">
+        <div className="btm-probe-head">
+          <span>{tr('插件更新')}</span>
+          <button type="button" className="btm-btn ghost" disabled={!!pluginBusy} onClick={loadPluginsUpd}>
+            {tr('刷新')}
+          </button>
+        </div>
+        {pluginsUpd === null ? (
+          <p className="btm-status">{tr('加载中…')}</p>
+        ) : pluginsUpd.some((it) => it.hasUpdate) ? (
+          <ul className="btm-set-list">
+            {pluginsUpd.filter((it) => it.hasUpdate).map((it) => (
+              <li key={it.pkg}>
+                <div className="btm-set-name">
+                  <b>{it.name}</b>
+                  <span>{it.pkg}</span>
+                </div>
+                <div className="btm-set-ver">
+                  <span className="btm-ver-old">{it.current || '—'}</span>
+                  <span className="btm-ver-arrow">→</span>
+                  <span className="btm-ver-new">{it.latest}</span>
+                </div>
+                <button
+                  type="button"
+                  className="btm-btn primary"
+                  disabled={!!pluginBusy}
+                  onClick={() => updatePluginOne(it)}
+                >
+                  {pluginBusy === it.pkg ? tr('更新中…') : tr('更新')}
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="btm-status">{tr('暂无可更新的插件')}</p>
+        )}
+      </div>
+
+      {/* 技能更新 */}
+      <div className="btm-probe">
+        <div className="btm-probe-head">
+          <span>{tr('技能更新')}</span>
+          <div className="btm-set-actions" style={{ margin: 0 }}>
+            <button
+              type="button"
+              className="btm-btn primary"
+              disabled={!state.updatable || !!busy}
+              onClick={updateAll}
+            >
+              {tr('全部更新')}
+            </button>
+            <button type="button" className="btm-btn ghost" disabled={!!busy} onClick={load}>
+              {tr('刷新')}
+            </button>
+          </div>
+        </div>
 
       <div className="btm-set-actions">
         <button
@@ -2431,37 +3298,387 @@ function SettingsCard(props) {
         <p className="btm-status">{tr('还没有已安装的技能')}</p>
       ) : null}
 
-      {state.items.length ? (
-        <ul className="btm-set-list">
-          {state.items.map((it) => (
-            <li key={it.slug}>
-              <div className="btm-set-name">
-                <b>{it.name}</b>
-                <span>{it.slug}</span>
+        {state.items.length ? (
+          <ul className="btm-set-list">
+            {state.items.map((it) => (
+              <li key={it.slug}>
+                <div className="btm-set-name">
+                  <b>{it.name}</b>
+                  <span>{it.slug}</span>
+                </div>
+                <div className="btm-set-ver">
+                  {it.updatable ? (
+                    <>
+                      <span className="btm-ver-old">{it.localVersion || '—'}</span>
+                      <span className="btm-ver-arrow">→</span>
+                      <span className="btm-ver-new">{it.remoteVersion}</span>
+                    </>
+                  ) : (
+                    <span className="btm-ver-cur">{it.localVersion || it.remoteVersion || '—'}</span>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  className={it.updatable ? 'btm-btn primary' : 'btm-btn ghost'}
+                  disabled={!it.updatable || !!busy}
+                  onClick={() => updateOne(it.slug)}
+                >
+                  {busy === it.slug ? tr('更新中…') : it.updatable ? tr('更新') : tr('已是最新')}
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </div>{/* /.btm-probe 技能更新 */}
+        </>
+      ) : null}
+
+      {/* 配置：数据源与运行参数（原「常规」的有效字段归位于此） */}
+      {section === 'config' ? (
+        <div className="btm-set-page">
+          {/* 隐藏开关：关掉后配置从导航消失，需再次连点标题三次重新显示 */}
+          <div className="btm-custom">
+            <div className="btm-custom-title">
+              <span>{tr('配置菜单')}</span>
+            </div>
+            <label className="btm-set-toggle">
+              <span>{tr('显示配置菜单')}</span>
+              <input
+                type="checkbox"
+                checked={showConfig}
+                onChange={(e) => {
+                  setShowConfig(e.target.checked);
+                  if (!e.target.checked) setSection('updates');
+                }}
+              />
+            </label>
+          </div>
+          {form ? (
+            <div className="btm-set-form">
+              <label>
+                <span>{tr('接口地址')}</span>
+                <input
+                  className="btm-input"
+                  value={form.apiBase}
+                  onChange={(e) => setForm({ ...form, apiBase: e.target.value })}
+                  spellCheck={false}
+                />
+              </label>
+              <label>
+                <span>{tr('技能目录')}</span>
+                <input
+                  className="btm-input"
+                  value={form.skillsDir}
+                  onChange={(e) => setForm({ ...form, skillsDir: e.target.value })}
+                  spellCheck={false}
+                />
+              </label>
+              <label>
+                <span>{tr('请求超时（毫秒）')}</span>
+                <input
+                  className="btm-input"
+                  type="number"
+                  min="1000"
+                  max="120000"
+                  value={form.timeoutMs}
+                  onChange={(e) => setForm({ ...form, timeoutMs: Number(e.target.value) || 0 })}
+                />
+              </label>
+              <label>
+                <span>{tr('搜索结果上限')}</span>
+                <input
+                  className="btm-input"
+                  type="number"
+                  min="1"
+                  max="80"
+                  value={form.maxResults}
+                  onChange={(e) => setForm({ ...form, maxResults: Number(e.target.value) || 0 })}
+                />
+              </label>
+              <button type="button" className="btm-btn primary" disabled={saving} onClick={saveCfg}>
+                {saving ? tr('保存中…') : tr('保存')}
+              </button>
+            </div>
+          ) : (
+            <p className="btm-status">{tr('加载中…')}</p>
+          )}
+        </div>
+      ) : null}
+
+      {/* 诊断：环境快照（排查"别人电脑装不上"） */}
+      {section === 'diagnostics' ? (
+        <div className="btm-set-page">
+          <p className="btm-custom-desc">{tr('环境快照：版本、运行时与 CLI 入口，排查安装问题用')}</p>
+          {diag ? (
+            <>
+              <ul className="btm-kv btm-set-kv">
+                <li><span>{tr('插件版本')}</span><b>{diag.version || '—'}</b></li>
+                <li><span>{tr('运行环境')}</span><b>{diag.runtime}{diag.canAutoRestart ? '' : '（手动重启）'}</b></li>
+                <li><span>Node</span><b>{diag.node}</b></li>
+                <li><span>{tr('平台')}</span><b>{diag.platform}</b></li>
+                <li>
+                  <span>{tr('CLI 入口')}</span>
+                  <b title={diag.cliEntry || undefined}>
+                    {diag.cliEntry || tr('（仅 PATH，未找到内置入口）')}
+                  </b>
+                </li>
+                <li><span>profile</span><b>{diag.profile}</b></li>
+                <li><span>{tr('接口地址')}</span><b>{diag.apiBase}</b></li>
+                {diag.npmRegistry ? <li><span>{tr('npm 镜像源')}</span><b>{diag.npmRegistry}</b></li> : null}
+                {diag.proxy && Object.keys(diag.proxy).length ? (
+                  <li><span>{tr('代理环境')}</span><b>{JSON.stringify(diag.proxy)}</b></li>
+                ) : null}
+                <li>
+                  <span>{tr('工具链版本')}</span>
+                  <b>
+                    dsh {diag.dshVersion || '?'} · pnpm {diag.pnpmVersion || '?'} · npm {diag.npmVersion || '?'} · git {diag.gitVersion || '?'}
+                  </b>
+                </li>
+              </ul>
+
+              {/* 连通性探测：流式逐行，行按钮可单测 */}
+              <div className="btm-probe">
+                <div className="btm-probe-head">
+                  <span>{tr('连通性探测')}</span>
+                  <button type="button" className="btm-btn ghost" disabled={probing} onClick={() => runProbes()}>
+                    {tr('全部重测')}
+                  </button>
+                </div>
+                <ul className="btm-probe-list">
+                  {[['npm', tr('npm registry（依赖安装通道）')], ['github', tr('GitHub（git 源与预检通道）')], ['catalog', tr('百通目录站（数据源）')]].map(([key, name]) => {
+                    const p = probes[key] || { status: 'idle' };
+                    return (
+                      <li key={key} className={'btm-probe-row ' + (p.status || '')}>
+                        <span className="btm-probe-dot" aria-hidden="true" />
+                        <span className="btm-probe-name">{name}</span>
+                        <span className="btm-probe-addr" title={p.display}>{p.display || '—'}</span>
+                        <span className="btm-probe-ms">
+                          {p.status === 'running' ? tr('探测中…') : p.status === 'ok' ? tr('可用') + ' ' + (p.code || '') + ' ' + (p.ms != null ? p.ms + 'ms' : '') : p.status === 'fail' ? tr('不可达') : ''}
+                        </span>
+                        <button type="button" className="btm-btn ghost btm-btn-icon" disabled={probing} onClick={() => runProbes(key)} title={tr('重测')}>
+                          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M21 12a9 9 0 1 1-2.64-6.36" /><path d="M21 3v6h-6" />
+                          </svg>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
               </div>
-              <div className="btm-set-ver">
-                {it.updatable ? (
+              <button type="button" className="btm-btn ghost" onClick={copyDiag}>
+                {tr('复制诊断信息')}
+              </button>
+            </>
+          ) : (
+            <p className="btm-status">{tr('加载中…')}</p>
+          )}
+        </div>
+      ) : null}
+
+      {/* 操作日志：最近 20 次安装/更新/卸载 */}
+      {section === 'logs' ? (
+        <div className="btm-set-page">
+          {/* 概览行：条数 + 路径 + 打开查看器 / 导出 / 定位 / 清空（对齐 dsh-plugin 的 logs 卡片） */}
+          {logs ? (
+            <div className="btm-logmeta">
+              <span className="btm-logmeta-count">{tr('{n} 条', { n: String(Number(logs.total) || 0) })}</span>
+              <span className="btm-logmeta-path" title={logs.path}>{logs.path || ''}</span>
+            </div>
+          ) : null}
+          <div className="btm-logbar">
+            <button type="button" className="btm-btn primary" onClick={() => setLogsModal(true)}>
+              {tr('打开日志查看器')}
+            </button>
+            <button type="button" className="btm-btn ghost" onClick={exportLogs}>{tr('导出日志')}</button>
+            <button type="button" className="btm-btn ghost" onClick={revealLogFile}>{tr('在文件夹中显示')}</button>
+            <button type="button" className="btm-btn danger" onClick={clearLogs}>{tr('清空日志')}</button>
+          </div>
+
+          {/* 预览：最近 12 条（完整列表在查看器里翻页，对齐 dsh-plugin 的 PREVIEW = 12） */}
+          {logs ? (
+            logs.entries && logs.entries.length ? (
+              <ul className="btm-loglist">
+                {logs.entries.slice(0, 12).map((e, i) => (
+                  <li key={'p' + i} className={'btm-logrow ' + e.level}>
+                    <span className={'btm-log-lv ' + e.level}>{tr(LEVEL_TEXT[e.level] || e.level)}</span>
+                    <span className="btm-log-time">{formatLogTime(e.at)}</span>
+                    <span className="btm-log-cat">{tr(CAT_TEXT[e.category] || e.category)}</span>
+                    <span className="btm-log-event" title={e.event}>{e.event}</span>
+                    <span className="btm-log-msg" title={e.message}>{e.message}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="btm-status">{tr('暂无操作记录')}</p>
+            )
+          ) : (
+            <p className="btm-status">{tr('加载中…')}</p>
+          )}
+
+          {/* 安装过程日志目录（点开看完整 pnpm 输出） */}
+          {logs && logs.ops && logs.ops.length ? (
+            <div className="btm-probe">
+              <div className="btm-probe-head"><span>{tr('安装日志查看器')}</span></div>
+              <ul className="btm-set-list">
+                {logs.ops.map((it) => (
+                  <li key={it.id}>
+                    <div className="btm-set-name">
+                      <b>{formatTime(it.time)}</b>
+                      <span>{it.summary || it.id}</span>
+                    </div>
+                    <span className={it.failed ? 'btm-badge is-failed' : 'btm-badge'}>
+                      {it.failed ? tr('失败') : tr('成功')}
+                    </span>
+                    <button type="button" className="btm-btn ghost" onClick={() => openLogViewer(it.id)}>
+                      {tr('查看')}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {logs && logs.path ? <p className="btm-custom-hint">{logs.path}</p> : null}
+        </div>
+      ) : null}
+
+      {/* 系统日志查看器（对齐 dsh-plugin LogsModal：chip 双轴筛选 + 累积分页 + 清空/导出/定位） */}
+      {logsModal ? (
+        <div className="btm-sheet-mask" onClick={() => setLogsModal(false)}>
+          <div className="btm-sheet btm-logviewer" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+            <div className="btm-sheet-top">
+              <div className="btm-sheet-title">
+                <h3>{tr('系统日志')}</h3>
+                <p>{logs ? tr('{n} 条', { n: String(Number(logs.total) || 0) }) : ''}</p>
+              </div>
+              <button type="button" className="btm-close" onClick={() => setLogsModal(false)} aria-label={tr('关闭')}>×</button>
+            </div>
+            <div className="btm-sheet-body">
+              {/* 类别 chip 行 */}
+              <div className="btm-chips" role="group" aria-label={tr('类别')}>
+                {CAT_FILTERS.map(([v, k]) => (
+                  <button
+                    key={v}
+                    type="button"
+                    className={'btm-chip' + (logCat === v ? ' on' : '')}
+                    onClick={() => setLogCat(v)}
+                  >
+                    {tr(k)}
+                  </button>
+                ))}
+              </div>
+              {/* 级别 chip 行 */}
+              <div className="btm-chips" role="group" aria-label={tr('级别')}>
+                {LEVEL_FILTERS.map(([v, k]) => (
+                  <button
+                    key={v}
+                    type="button"
+                    className={'btm-chip lv-' + v + (logLevel === v ? ' on' : '')}
+                    onClick={() => setLogLevel(v)}
+                  >
+                    {tr(k)}
+                  </button>
+                ))}
+              </div>
+              {/* 搜索 + 动作 */}
+              <div className="btm-logbar" style={{ marginTop: 8 }}>
+                <input
+                  className="btm-input btm-logbar-q"
+                  placeholder={tr('关键词')}
+                  value={logQuery}
+                  onChange={(e) => setLogQuery(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') loadLogs(0); }}
+                  spellCheck={false}
+                />
+                <button type="button" className="btm-btn ghost" onClick={() => loadLogs(0)}>{tr('刷新')}</button>
+                <button type="button" className="btm-btn ghost" onClick={exportLogs}>{tr('导出日志')}</button>
+                <button type="button" className="btm-btn ghost" onClick={revealLogFile}>{tr('在文件夹中显示')}</button>
+                <button type="button" className="btm-btn danger" onClick={clearLogs}>{tr('清空日志')}</button>
+              </div>
+              {/* 日志列表（累积） */}
+              {logs ? (
+                logs.entries && logs.entries.length ? (
                   <>
-                    <span className="btm-ver-old">{it.localVersion || '—'}</span>
-                    <span className="btm-ver-arrow">→</span>
-                    <span className="btm-ver-new">{it.remoteVersion}</span>
+                    <ul className="btm-loglist btm-loglist-tall">
+                      {logs.entries.map((e, i) => (
+                        <li key={'m' + i} className={'btm-logrow ' + e.level}>
+                          <span className={'btm-log-lv ' + e.level}>{tr(LEVEL_TEXT[e.level] || e.level)}</span>
+                          <span className="btm-log-time">{formatLogTime(e.at)}</span>
+                          <span className="btm-log-cat">{tr(CAT_TEXT[e.category] || e.category)}</span>
+                          <span className="btm-log-event" title={e.event}>{e.event}</span>
+                          <span className="btm-log-msg" title={e.message}>{e.message}</span>
+                        </li>
+                      ))}
+                    </ul>
+                    {logOffset + 50 < (Number(logs.total) || 0) ? (
+                      <div className="btm-more">
+                        <button type="button" className="btm-btn ghost" onClick={() => loadLogs(logOffset + 50, true)}>
+                          {tr('加载更多')}
+                        </button>
+                      </div>
+                    ) : null}
                   </>
                 ) : (
-                  <span className="btm-ver-cur">{it.localVersion || it.remoteVersion || '—'}</span>
-                )}
-              </div>
-              <button
-                type="button"
-                className={it.updatable ? 'btm-btn primary' : 'btm-btn ghost'}
-                disabled={!it.updatable || !!busy}
-                onClick={() => updateOne(it.slug)}
-              >
-                {busy === it.slug ? tr('更新中…') : it.updatable ? tr('更新') : tr('已是最新')}
-              </button>
-            </li>
-          ))}
-        </ul>
+                  <p className="btm-status">{tr('暂无操作记录')}</p>
+                )
+              ) : (
+                <p className="btm-status">{tr('加载中…')}</p>
+              )}
+              {logs && logs.path ? <p className="btm-custom-hint">{logs.path}</p> : null}
+            </div>
+          </div>
+        </div>
       ) : null}
+
+      {/* 安装日志查看器弹层 */}
+      {logViewer ? (
+        <div className="btm-sheet-mask" onClick={() => setLogViewer(null)}>
+          <div className="btm-sheet btm-logviewer" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+            <div className="btm-sheet-top">
+              <div className="btm-sheet-title">
+                <h3>{tr('安装日志查看器')}</h3>
+                <p>{logViewer.id}</p>
+              </div>
+              <button type="button" className="btm-close" onClick={() => setLogViewer(null)} aria-label={tr('关闭')}>×</button>
+            </div>
+            <div className="btm-sheet-body">
+              <div className="btm-logbar">
+                <button
+                  type="button"
+                  className="btm-btn ghost"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(logViewer.text);
+                      flash(tr('已复制'));
+                    } catch { /* 剪贴板不可用 */ }
+                  }}
+                >
+                  {tr('复制')}
+                </button>
+                <span className="btm-custom-hint" style={{ margin: 0 }}>
+                  {tr('{n} 条', { n: String(logViewer.text).split('\n').length })}
+                </span>
+              </div>
+              <pre className="btm-logpre">{logViewer.text}</pre>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* 重置：删除本地覆盖配置 */}
+      {section === 'reset' ? (
+        <div className="btm-set-page">
+          <p className="btm-custom-desc">{tr('删除本地覆盖配置，恢复为插件默认值')}</p>
+          <button type="button" className="btm-btn danger" disabled={saving} onClick={resetCfg}>
+            {saving ? tr('重置中…') : tr('重置')}
+          </button>
+        </div>
+      ) : null}
+
+        </div>{/* /.btm-set-content */}
+      </div>{/* /.btm-set-body */}
+
+      {/* 提示浮层：3 秒自动消失，不占据卡片流空间 */}
+      <AutoToast key={noteSeq} text={note} kind={noteKind} onDone={() => setNote('')} />
     </div>
   );
 }
@@ -2557,6 +3774,16 @@ function PlazaPage({ onClose, box, ctx }) {
     >
       <div className="btm-top">
         <div className="btm-tabs" role="tablist">
+          {/* 百通 logo：点击跳转门户；图片由宿主 /baitong-market/logo 提供（不进 client bundle） */}
+          <a
+            className="btm-brand"
+            href="https://s.1100111.cn"
+            target="_blank"
+            rel="noreferrer noopener"
+            title="百通 · s.1100111.cn"
+          >
+            <img src="/baitong-market/logo" alt="百通" />
+          </a>
           <span className="btm-top-title">{lookup('百通插件广场')}</span>
         </div>
         <VersionBadge />
@@ -2680,16 +3907,26 @@ function apply(ctx) {
     )),
   );
 
-  // 设置页卡片：已安装技能清单 + 单个/全部更新
-  slots.inject('settings.plugin.item', () =>
+  // 设置页：**一级 section**（settings.section，list 插槽）。
+  // 🔴 层级修正（2026-10-19）：settings.plugins.tab 是「内置插件」区里的一个标签页
+  //（用户实测：出现在 设置-内置插件 下面，不是要的效果）；与「内置插件」**同级**的
+  // 侧边栏入口是 settings.section —— occupants 正是 general/models/plugins/agent-presets。
+  // 注册自己的 section：label 走 thunk 每次投影重读，跟随 Harness 中英文。
+  slots.inject('settings.section', () =>
     slots.register(
       {
-        name: 'settings.plugin.item',
-        id: 'baitong-market',
-        key: 'baitong-market',
+        name: 'settings.section',
+        id: 'baitong-plugin-market',
+        key: 'baitong-plugin-market', // rc.6 list 用 id，rc.7+ keyed 用 key：都给，跨版本兼容
+        order: 40,
+        label: () => lookup('百通插件广场'),
         locale: 'baitong-market',
       },
-      (cardProps) => <SettingsCard {...cardProps} />,
+      (sectionProps) => (
+        <I18nProvider t={sectionProps && sectionProps.t}>
+          <SettingsCard {...sectionProps} />
+        </I18nProvider>
+      ),
     ),
   );
 

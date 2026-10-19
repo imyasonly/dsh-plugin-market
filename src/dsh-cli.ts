@@ -5,7 +5,7 @@
  *    超时/取消处理、安装状态快照（面板轮询用）。
  */
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { dshHome } from './config-store.js';
@@ -166,6 +166,8 @@ export const progress = {
   size: null as string | null,
   ndjson: false,
   error: null as string | null,
+  /** 最近一次操作的过程日志（完整 pnpm/dsh 输出），反馈问题时把该文件发给开发者 */
+  logPath: null as string | null,
 };
 export const BOOT_ID = `${String(process.pid)}-${String(Date.now())}`;
 
@@ -182,6 +184,41 @@ function cmdCommandLine(argv: string[]): string {
   return argv.map(quoteCmdArg).join(' ');
 }
 
+/**
+ * 🔴 找一个「不依赖 PATH 的 dsh 入口」（2026-10-19 修）。
+ *
+ * 事故（用户机器实测）：桌面端 GUI 启动时 process.argv[1] 是 Electron 主入口，不匹配
+ * bin\.js$ / dsh$，dshArgv 直接退化成裸调 `dsh`；而那台机器从未启用 DSH 的 PATH 注册
+ * （官方注册机制存在但默认不开），cmd 报 "'dsh' 不是内部或外部命令"，安装/自我升级全挂。
+ *
+ * 修复：按官方 dsh.cmd shim 的两段路径反推固定落盘位置，全部 existsSync 校验：
+ *   ① runtime 自带 node：~/.dsh/dsh-runtimes/<name>/dependencies/node/bin/node.exe
+ *   ② CLI 实体：~/.dsh/profiles/node_modules/@deepseek-ai/dsh/lib/bin.js
+ * 两者都存在 → 用 node 直接跑 bin.js，完全绕开 PATH。
+ */
+export function bundledDshEntry(): { file: string; args: string[]; cwd: string } | null {
+  const home = dshHome();
+  // ① 找一个自带 node 的 runtime（dsh-primary-runtime 是默认名，但别写死）
+  let nodeExe: string | null = null;
+  try {
+    const runtimesDir = join(home, 'dsh-runtimes');
+    for (const name of readdirSync(runtimesDir)) {
+      const candidate = join(runtimesDir, name, 'dependencies', 'node', 'bin', process.platform === 'win32' ? 'node.exe' : 'bin', 'node');
+      const winCandidate = join(runtimesDir, name, 'dependencies', 'node', 'bin', 'node.exe');
+      const posixCandidate = join(runtimesDir, name, 'dependencies', 'node', 'bin', 'node');
+      const target = process.platform === 'win32' ? winCandidate : posixCandidate;
+      if (existsSync(target)) { nodeExe = target; break; }
+      if (process.platform !== 'win32' && existsSync(candidate)) { nodeExe = candidate; break; }
+    }
+  } catch { /* 无 runtimes 目录 */ }
+  // ② CLI 实体（官方 shim 硬编码的就是这个路径）
+  const binJs = join(home, 'profiles', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js');
+  if (!existsSync(binJs)) return null;
+  // node 找不到时退回当前进程（桌面端进程即 Electron 的 node，能跑 JS 入口）
+  const node = nodeExe ?? process.execPath;
+  return { file: node, args: [binJs], cwd: dirname(binJs) };
+}
+
 /** 定位当前 dsh 进程入口（优先复用本进程 node，避免 PATH 环境差异） */
 export function dshArgv(input: { argv?: string[]; execArgv?: string[]; execPath?: string; argv0?: string; platform?: NodeJS.Platform } = {}): { file: string; args: string[]; cwd?: string; viaShell: boolean } {
   const argv = input.argv ?? process.argv;
@@ -195,6 +232,10 @@ export function dshArgv(input: { argv?: string[]; execArgv?: string[]; execPath?
     const abs = resolve(entry);
     return { file: node, args: [...execArgv, abs], cwd: dirname(abs), viaShell: false };
   }
+  // 自身 argv 不像 CLI 入口（典型：桌面端 GUI）：先试 DSH 自带的固定位置，
+  // 彻底找不到才退回 PATH 里的 dsh —— 那台没启用 PATH 注册的机器靠这步救回来。
+  const bundled = bundledDshEntry();
+  if (bundled) return { ...bundled, viaShell: false };
   return { file: 'dsh', args: [], cwd: undefined, viaShell: platform === 'win32' };
 }
 
@@ -232,6 +273,7 @@ export function publicInstallStatus(): Record<string, unknown> {
     size: progress.size,
     ndjson: progress.ndjson,
     error: progress.error,
+    logPath: progress.logPath,
     boot: BOOT_ID,
   };
 }
@@ -361,6 +403,21 @@ export async function runDshPlugin(profile: string, pluginArgs: string[]): Promi
   const prepared = preparePluginArgs(dir, pluginArgs);
   const tracker = beginProgress(target);
   const feed = makeProgressFeeder(tracker);
+  // 🔴 完整过程日志（2026-10-19 加）：远程用户报"安装/升级失败"时，面板里的报错经
+  // summarizePnpmFailure 提炼，会丢掉 pnpm/dsh 的原始输出；让他们取这个文件回来即可定位，
+  // 不用会话还在、面板还开着。失败与成功都落盘，每次操作一个文件。
+  const logDir = join(dir, '.plugin-manager', 'logs', `operation-${opStamp()}`);
+  let logFile: string | null = null;
+  try {
+    mkdirSync(logDir, { recursive: true });
+    logFile = join(logDir, 'install.log');
+    progress.logPath = logFile;
+    appendLog(logFile, `# ${new Date().toISOString()} profile=${profile} args=${JSON.stringify(prepared)}`);
+    appendLog(logFile, `# entry=${argv.file} ${JSON.stringify(argv.args)} viaShell=${argv.viaShell}`);
+    appendLog(logFile, `# platform=${process.platform} node=${process.version} pnpm=(managed by dsh)`);
+  } catch {
+    /* 日志写不进去不能阻塞安装 */
+  }
   try {
     return await runCommand(argv.file, [...argv.args, 'plugin', '--profile', profile, ...prepared], {
       cwd: argv.cwd,
@@ -371,15 +428,30 @@ export async function runDshPlugin(profile: string, pluginArgs: string[]): Promi
       onChunk: (text) => {
         feed(text);
         syncProgress(tracker);
+        if (logFile) appendLog(logFile, text);
       },
     });
   } catch (err) {
     // 超时/失败时把原因写入状态端点，轮询侧才能看到错误终态
     const text = err instanceof Error ? err.message : String(err);
     if (progress.error === null) progress.error = text.slice(0, 800);
+    if (logFile) appendLog(logFile, `# FAILED: ${text.slice(0, 4000)}`);
     throw err;
   } finally {
     progress.active = false;
+    if (logFile) appendLog(logFile, `# end ${new Date().toISOString()}`);
+  }
+}
+
+function opStamp(): string {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function appendLog(file: string, text: string): void {
+  try {
+    appendFileSync(file, text.endsWith('\n') ? text : `${text}\n`);
+  } catch {
+    /* 日志失败不影响安装主流程 */
   }
 }
 
