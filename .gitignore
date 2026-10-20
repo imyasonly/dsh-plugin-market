@@ -23,3 +23,5 @@ coverage/
 dist/
 .idea/
 .vscode/
+.workbuddy
+/logs
