@@ -79,15 +79,21 @@ React 由 factory 的 `require('react')` 从客户端模块表注入。因此：
 
 ## 自检套件
 
-改动后跑一遍，全绿共 **285 项**：
+改动后跑一遍，全绿共 **432 项**：
 
 ```sh
-node logs/_verify/verify-all.mjs            # 一次跑完下面 5 套，并核对本文档里的项数是否与实际一致
+node logs/_verify/verify-all.mjs            # 一次跑完下面 11 套，并核对本文档里的项数是否与实际一致
 node logs/_verify/publish-check.mjs          # 97 项 发包前置 + 产物形态 + 隐私 + 文档红线 + 包名/主体/仓库一致性 + peer/运行时匹配 + dependencies 守卫 + 文档锚点/互链
 node logs/_verify/install-ux-check.mjs       # 35 项 进度条展示时机 + 收尾守卫
 node logs/_verify/install-fallback-check.mjs # 39 项 网络失败可读化 + 降级分支
 node logs/_verify/restart-check.mjs          # 45 项 重启三条路径（真跑）
 node logs/_verify/card-check.mjs             # 69 项 卡片结构 + 图标兜底/归一化 + 空态居中 + 概述富文本净化
+node logs/_verify/reset-check.mjs            # 41 项 重置只重置本插件（隔离边界）+ 镜像源/更新策略真的回落默认值 + 重置后再保存不复活 + 清宿主残留错误与日志文件
+node logs/_verify/platform-check.mjs         # 24 项 Windows/macOS/Linux 子进程 PATH（不写死盘符/家目录、HOME 被 Git Bash 污染时不串味）+ npm 探测（nvm/nvm-windows/fnm/Homebrew）
+node logs/_verify/toast-check.mjs            # 19 项 提示条单一出口 + AutoToast 计时确定性 + 关面板不残留
+node logs/_verify/install-error-check.mjs    # 23 项 安装报错已读表在模块级（关面板重开不复活）+ 主页轮询不回填 + 新一轮失败仍提示
+node logs/_verify/settings-desc-check.mjs    # 18 项 设置分区说明单一渲染点（诊断页不再重复一行）+ 诊断页字段集合（不含接口地址）
+node logs/_verify/registry-fallback-check.mjs # 22 项 自我升级镜像同步延迟自动换官方源（不误判）+ 重置文案声明"日志会被清空"
 ```
 
 全部为离线静态 + 行为级断言，可直接跑；临时产物一律放 `logs/_verify/_tmp/`。

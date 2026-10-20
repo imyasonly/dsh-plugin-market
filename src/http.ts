@@ -14,6 +14,12 @@ export interface FetchOpts {
   timeoutMs?: number;
   userAgent?: string;
   signal?: AbortSignal | null;
+  /** HTTP 方法，默认 GET；带 body 时传 'POST' */
+  method?: string;
+  /** 请求体（JSON 字符串；调用方自行 JSON.stringify） */
+  body?: string;
+  /** 覆盖默认的请求头（如 POST JSON 的 content-type） */
+  headers?: Record<string, string>;
 }
 
 /**
@@ -78,10 +84,13 @@ export async function fetchBytes(url: string, opts: FetchOpts = {}): Promise<{ b
   opts.signal?.addEventListener('abort', onAbort, { once: true });
   try {
     const res = await fetch(url, {
+      method: opts.method ?? 'GET',
+      ...(opts.body === undefined ? {} : { body: opts.body }),
       signal: controller.signal,
       headers: {
         'User-Agent': opts.userAgent ?? 'Mozilla/5.0 (compatible; baitong-market/0.1)',
         Accept: 'application/json, */*',
+        ...(opts.headers ?? {}),
       },
       redirect: 'follow',
     });

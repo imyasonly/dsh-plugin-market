@@ -7,7 +7,7 @@
  *            查看器可按「安装时哪步不兼容」「卸载时哪步不兼容」针对性排查
  * 写入失败绝不影响主流程；读取时超过 MAX_LOG_LINES 就地裁剪，防无限膨胀。
  */
-import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, truncateSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, truncateSync } from 'node:fs';
 import { dirname, join, normalize } from 'node:path';
 import { dshHome } from './config-store.js';
 
@@ -57,6 +57,25 @@ export function clearLogs(): boolean {
     if (!existsSync(file)) return true;
     truncateSync(file);
     return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 删除日志文件本身（不是截断）。
+ *
+ * 与 clearLogs 的区别：
+ *   clearLogs   —— 「清空日志」按钮用，保留空文件，用户还能立刻看到后续记录；
+ *   removeLogFile —— 「重置」用，用户要的是"恢复到刚装好时的干净状态"，
+ *                    空文件会让人以为历史还在。返回是否真的删掉了。
+ */
+export function removeLogFile(): boolean {
+  try {
+    const file = logFilePath();
+    if (!existsSync(file)) return false;
+    rmSync(file, { force: true });
+    return !existsSync(file);
   } catch {
     return false;
   }

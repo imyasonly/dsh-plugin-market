@@ -95,12 +95,23 @@ export function readOverlay(): Record<string, unknown> {
   }
 }
 
+/**
+ * 把一层 overlay 合并进运行时配置。
+ *
+ * 🔴 必须覆盖 BaitongConfig 的**全部**字段：调用方把它当"整层覆盖"用，
+ *    漏一个字段，那一层就会静默失效。历史坑：npmRegistry / checkUpdatesOnStart
+ *    曾经漏在这里，导致「重置」删了文件但内存值不变——接口回传旧值、探针继续走旧镜像，
+ *    用户再点一次保存还会把旧值写回磁盘，重置等于没做。
+ */
 export function assignConfig(cfg: BaitongConfig, overlay: Record<string, unknown>): void {
   if (typeof overlay.apiBase === 'string' && overlay.apiBase) cfg.apiBase = overlay.apiBase;
   if (typeof overlay.skillsDir === 'string' && overlay.skillsDir) cfg.skillsDir = overlay.skillsDir;
   if (typeof overlay.timeoutMs === 'number' && overlay.timeoutMs > 0) cfg.timeoutMs = overlay.timeoutMs;
   if (typeof overlay.userAgent === 'string' && overlay.userAgent) cfg.userAgent = overlay.userAgent;
   if (typeof overlay.maxResults === 'number' && overlay.maxResults > 0) cfg.maxResults = overlay.maxResults;
+  // 空串是合法值（= 跟随本机 npm 配置），不能用 truthy 判断，否则重置清不掉镜像源
+  if (typeof overlay.npmRegistry === 'string') cfg.npmRegistry = overlay.npmRegistry;
+  if (typeof overlay.checkUpdatesOnStart === 'boolean') cfg.checkUpdatesOnStart = overlay.checkUpdatesOnStart;
 }
 
 /** 设置页保存：写 overlay（不进 git，不影响宿主配置） */

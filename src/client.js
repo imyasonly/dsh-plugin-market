@@ -134,6 +134,11 @@ const EN = {
   '更新中…': 'Updating…',
   '更新失败：': 'Update failed: ',
   '启用': 'Enable',
+  '插件平台已发布 {v}（{repo}）': 'Platform release {v} ({repo})',
+  '从插件平台最新版本更新（{repo}）': 'Update to the latest platform release ({repo})',
+  '从 npm 最新版本更新': 'Update to the latest npm release',
+  '来自插件平台': 'From the plugin platform',
+  '从插件平台最新版本更新': 'Update to the latest platform release',
   '启用中…': 'Enabling…',
   '启用失败': 'Enable failed',
   '未启用': 'Disabled',
@@ -227,6 +232,8 @@ const EN = {
   '腾讯云镜像': 'Tencent mirror',
   '清华 TUNA 镜像': 'Tsinghua TUNA mirror',
   '确认重置？本地覆盖配置（接口地址、技能目录等）将被删除': 'Reset confirmed? Local config overrides (API base, skills dir, …) will be deleted',
+  '删除本地覆盖配置，恢复为插件默认值；操作日志与残留的安装报错也会一并清空': 'Delete local config overrides and restore plugin defaults; the operation log and any leftover install error will also be cleared',
+  '操作日志会被清空，无法恢复。': 'The operation log will be cleared and cannot be recovered.',
   '已重置': 'Reset done',
   'CLI 入口': 'CLI entry',
   '（仅 PATH，未找到内置入口）': '(PATH only — bundled entry not found)',
@@ -291,10 +298,53 @@ function useTr() {
  * @param {number} [ms] 停留时长
  */
 const ERROR_AUTO_CLEAR_MS = 8000;
+
+/**
+ * 🔴 安装报错的「已读」记录必须放在**模块级**，不能放在组件 state 里（2026-10-20 修）。
+ *
+ * 用户报障：「安装失败：…已恢复旧版插件」这条，几秒后消失，
+ *   但右上角关闭面板、再从侧边栏点开，它又出现了，位置就在分类胶囊与卡片之间。
+ *
+ * 根因是两个"常驻"叠加：
+ *   1. 宿主侧 progress.error 会一直保留到下一次安装开工才清（local-api.ts 的
+ *      beginProgress 才置 null），所以 pluginInstallStatus 每次都把它带回来；
+ *   2. 前端用组件 state 记"这条已经读过了"，而**面板关闭时组件被卸载**，
+ *      state 随之销毁 —— 重新挂载时 dismissed 为空，旧报错又被当成新错误渲染。
+ *
+ * 修法：已读记录存到模块作用域，跨挂载存活；键是错误文本本身，
+ * 于是"同一段文本只提示一次"，文本变了（新一轮失败）才会重新提示。
+ * 用 Map 而不是单个字符串：避免 A→B→A 时把 A 又当成新的。
+ */
+const dismissedInstallErrors = new Map();
+/** 已读记录上限：安装报错文本可能很长，防止长会话里无限增长 */
+const DISMISSED_MAX = 20;
+function markInstallErrorRead(text) {
+  if (!text) return;
+  dismissedInstallErrors.delete(text);
+  dismissedInstallErrors.set(text, Date.now());
+  while (dismissedInstallErrors.size > DISMISSED_MAX) {
+    dismissedInstallErrors.delete(dismissedInstallErrors.keys().next().value);
+  }
+}
+function isInstallErrorRead(text) {
+  return !!text && dismissedInstallErrors.has(text);
+}
+
 function useAutoClearError(message, clear, ms = ERROR_AUTO_CLEAR_MS) {
   useEffect(() => {
     if (!message) return undefined;
-    const id = setTimeout(() => clear(''), ms);
+    // 🔴 与 InstallProgress 同一套已读表（2026-10-20 修）：
+    //    这些报错组件在面板关闭时会被卸载，组件 state 里的"已自动清除"随之丢失；
+    //    重新打开面板时宿主又会把同一条 progress.error 送回来，于是报错复活。
+    //    这里在清除的同时记到模块级，保证"同一条文本只打扰用户一次"。
+    if (isInstallErrorRead(message)) {
+      clear('');
+      return undefined;
+    }
+    const id = setTimeout(() => {
+      markInstallErrorRead(message);
+      clear('');
+    }, ms);
     return () => clearTimeout(id);
   }, [message, clear, ms]);
 }
@@ -716,17 +766,27 @@ function InstallProgress({ status, pending }) {
   // 用户看到的就是"报错永远不消失"。这里按错误文本记一次已读，超时后隐藏；
   // 文本变了（新一轮失败）重新计时，不是新的错误不受影响。
   const errText = status && !status.active && status.error ? String(status.error) : '';
-  const [dismissed, setDismissed] = useState('');
+  // 本挂载周期内是否已经把它收起来了（模块级已读表决定"要不要显示"，这里只管"何时收起"）
+  const [hidden, setHidden] = useState(false);
   useEffect(() => {
     if (!errText) {
-      setDismissed('');
+      setHidden(false);
       return undefined;
     }
-    const id = setTimeout(() => setDismissed(errText), ERROR_AUTO_CLEAR_MS);
+    // 已经读过的旧错误：直接不显示，也不启动计时
+    if (isInstallErrorRead(errText)) {
+      setHidden(true);
+      return undefined;
+    }
+    setHidden(false);
+    const id = setTimeout(() => {
+      markInstallErrorRead(errText); // 记到模块级：卸载/重挂载后仍然有效
+      setHidden(true);
+    }, ERROR_AUTO_CLEAR_MS);
     return () => clearTimeout(id);
   }, [errText]);
   if (!status || !status.active) {
-    if (errText && dismissed !== errText) {
+    if (errText && !hidden && !isInstallErrorRead(errText)) {
       return <div className="btm-progress-error">{tr('安装失败：')}{errText}</div>;
     }
     if (!pending) return null;
@@ -1757,8 +1817,13 @@ function InstalledView({ kind, keyword = '', installStatus, onChanged, onNeedRes
   const updatePlugin = async (item) => {
     setUninstallErr('');
     setBusyKey(item.key);
-    const targetVersion = latestMap.get(item.pkg)?.latest || '';
-    const [err] = await api('pluginUpdate', { pkg: item.pkg, profile: item.profile, targetVersion });
+    const meta = latestMap.get(item.pkg) || {};
+    // 平台渠道（GitHub 源插件）：把 repo + 平台 pinned sha 一起带回，后端渲染 github:owner/repo#sha
+    // registry 渠道：只带 version，后端渲染 pkg@version
+    const payload = meta.hubRepo
+      ? { pkg: item.pkg, profile: item.profile, targetRepo: meta.hubRepo, targetSha: meta.hubSha|| '' , targetVersion: meta.latest || '' }
+      : { pkg: item.pkg, profile: item.profile, targetVersion: meta.latest || '' };
+    const [err] = await api('pluginUpdate', payload);
     if (err) {
       setBusyKey(null);
       setUninstallErr(err);
@@ -1855,14 +1920,19 @@ function InstalledView({ kind, keyword = '', installStatus, onChanged, onNeedRes
             <div className="btm-card-meta">
               {it.version ? <span className="btm-card-profile">{fmtVer(it.version)}</span> : null}
               {/* 「可更新」放 meta 行与版本号并排：头部整行留给标题，避免名称被徽标挤没 */}
-              {kind !== 'skills' && latestMap.get(it.pkg) && latestMap.get(it.pkg).hasUpdate ? (
-                <span
-                  className="btm-badge is-update"
-                  title={tr('当前 {a} → 最新 {b}', { a: it.version, b: latestMap.get(it.pkg).latest })}
-                >
-                  {tr('可更新')}
-                </span>
-              ) : null}
+              {kind !== 'skills' && latestMap.get(it.pkg) && latestMap.get(it.pkg).hasUpdate ? (() => {
+                const lm = latestMap.get(it.pkg);
+                return (
+                  <span
+                    className="btm-badge is-update"
+                    title={lm.hubRepo
+                      ? tr('插件平台已发布 {v}（{repo}）', { v: lm.latest, repo: lm.hubRepo })
+                      : tr('当前 {a} → 最新 {b}', { a: it.version, b: lm.latest })}
+                  >
+                    {tr('可更新')}
+                  </span>
+                );
+              })() : null}
               {kind !== 'skills' && it.enabled === false ? (
                 <span className="btm-badge is-off" title={tr('已安装但未启用，DSH 不会加载它')}>
                   {tr('未启用')}
@@ -1920,6 +1990,9 @@ function InstalledView({ kind, keyword = '', installStatus, onChanged, onNeedRes
                   className="btm-btn primary"
                   disabled={busyKey === it.key || !!(installStatus && installStatus.active)}
                   onClick={() => updatePlugin(it)}
+                  title={latestMap.get(it.pkg).hubRepo
+                    ? tr('从插件平台最新版本更新（{repo}）', { repo: latestMap.get(it.pkg).hubRepo })
+                    : tr('从 npm 最新版本更新')}
                 >
                   {busyKey === it.key ? tr('更新中…') : tr('更新')}
                 </button>
@@ -2130,8 +2203,12 @@ function MarketPanel({ ctx }) {
         // 安装结束（active true→false）：有错误则展示，否则刷新列表让「已安装」生效
         if (wasActiveRef.current && !data.active) {
           setInstalling(null);
-          if (data.error) setError(t('安装失败：') + data.error + (data.logPath ? ' ' + t('失败详情已记录，可把该文件发给开发者排查：') + data.logPath : ''));
-          else {
+          if (data.error) {
+            // 同样只在"没读过"时展示：这条路径也可能在重挂载后重复命中
+            if (!isInstallErrorRead(data.error)) {
+              setError(t('安装失败：') + data.error + (data.logPath ? ' ' + t('失败详情已记录，可把该文件发给开发者排查：') + data.logPath : ''));
+            }
+          } else {
             setRestartHint(true);
             loadPlugins();
           }
@@ -2140,7 +2217,13 @@ function MarketPanel({ ctx }) {
           // 否则按钮会一直卡在禁用态、进度条永远停在"准备中"。
           // 比对"点击时的旧错误"是为了排除残留：只有全新错误才算本次失败。
           setInstalling(null);
-          setError(t('安装失败：') + data.error);
+          // 🔴 已读过的旧错误不再回填（2026-10-20 修）：
+          //    宿主 progress.error 会保留到下一次安装开工，轮询每次都会把它带回来；
+          //    面板重挂载后 installingRef 又有值，于是同一条报错反复出现在
+          //    「分类胶囊与卡片网格之间」——这正是用户反复反馈的那条。
+          if (!isInstallErrorRead(data.error)) {
+            setError(t('安装失败：') + data.error + (data.logPath ? ' ' + t('失败详情已记录，可把该文件发给开发者排查：') + data.logPath : ''));
+          }
         }
         wasActiveRef.current = !!data.active;
       }
@@ -2601,7 +2684,10 @@ function PluginSearchToolView(props) {
       // 尚未开工就失败（拉安装计划 / 预检出错）：同样要收尾，否则按钮一直卡在禁用态。
       // 比对"点击时的旧错误"是为了排除残留：只有全新错误才算本次失败。
       setBusy('');
-      setErr(tr('安装失败：') + progress.error);
+      // 🔴 已读过的旧错误不再回填（2026-10-20 修）：
+      //    宿主 progress.error 会保留到下一次安装开工，面板重挂载时它还在，
+      //    不拦就会「关掉再打开又冒出同一条报错」。
+      if (!isInstallErrorRead(progress.error)) setErr(tr('安装失败：') + progress.error);
     }
     wasActiveRef.current = active;
   }, [progress, tr]);
@@ -2808,13 +2894,24 @@ function SimpleToolView(props) {
  * 为什么不用原来的 <p className="btm-status">：它挂在卡片流末尾，位置跟着内容跑、
  * 弹在分区底部，用户填完表单得往下找；而且不消失，像常驻错误。
  * 这里固定浮在卡片右下，3 秒自动收起 —— 反馈与"是否还在"解耦。
+ *
+ * 🔴 定时器必须挂在 **seq** 上，不能挂在 text 上（2026-10-20 修）：
+ *   外层写的是 <AutoToast key={noteSeq} text={note} onDone={...} />。
+ *   若 effect 依赖 [text, onDone]：
+ *     - onDone 是内联箭头函数，每次父组件渲染都是新引用 → effect 反复重建；
+ *     - 更糟的是"连续两次相同文案"（例如连点两次刷新都失败）时 text 不变，
+ *       但 key 变了会重新挂载，而 effect 依赖没变 —— 计时起点不确定，
+ *       表现为"有时 3 秒消失，有时一直挂着"。
+ *    改为以 seq 作为唯一计时依据，每次 flash 都得到一段完整、确定的 3 秒。
  */
-function AutoToast({ text, onDone, kind }) {
+function AutoToast({ text, seq, onDone, kind }) {
+  const doneRef = useRef(onDone);
+  doneRef.current = onDone; // 回调走 ref，避免引用变化重启动计时
   useEffect(() => {
     if (!text) return undefined;
-    const id = setTimeout(onDone, 3000);
+    const id = setTimeout(() => doneRef.current && doneRef.current(), 3000);
     return () => clearTimeout(id);
-  }, [text, onDone]);
+  }, [text, seq]); // 只在"新的一条提示"时重新计时
   if (!text) return null;
   return (
     <div className={'btm-toastbox' + (kind === 'error' ? ' is-error' : '')} role="status">
@@ -2941,6 +3038,18 @@ function SettingsCard(props) {
         });
       }
     });
+    /**
+     * 🔴 卸载时清掉未消费的提示（2026-10-20 修）。
+     * 用户报障：报错 3 秒后消失 → 右上角关闭面板 → 再点侧边栏，同一条报错又出现。
+     * 根因：note 是组件 state，面板关闭时组件被卸载，但 state 里的旧值随实例一起
+     * 销毁前已经渲染过；重新打开时若恰好复用了实例（或上游做了缓存），旧文案会被
+     * 重新投影出来。这里在卸载时主动清空，保证"关掉即结束"，不留跨次残留。
+     * 同理清掉 state.error 的瞬时快照之外的提示类状态。
+     */
+    return () => {
+      setNote('');
+      setNoteSeq((n) => n + 1);
+    };
   }, [load]);
 
   /** 插件更新列表：已安装清单 × 线上 latest */
@@ -2959,6 +3068,10 @@ function SettingsCard(props) {
           current: it.version || '',
           latest: (l && l.latest) || '',
           hasUpdate: !!(l && l.hasUpdate),
+          // 平台渠道（GitHub 源）更新目标；registry 源没有这两个字段
+          hubRepo: (l && l.hubRepo) || '',
+          hubSha: (l && l.hubSha) || '',
+          via: (l && l.via) || 'none',
         };
       }),
     );
@@ -2976,7 +3089,11 @@ function SettingsCard(props) {
     if (pluginBusy) return;
     setPluginBusy(item.pkg);
     setNote('');
-    const [err] = await api('pluginUpdate', { pkg: item.pkg, profile: item.profile, targetVersion: item.latest });
+    // GitHub 源走平台 pinned sha，registry 源走版本号（后端据 spec 自行判定）
+    const payload = item.hubRepo
+      ? { pkg: item.pkg, profile: item.profile, targetRepo: item.hubRepo, targetSha: item.hubSha || '', targetVersion: item.latest || '' }
+      : { pkg: item.pkg, profile: item.profile, targetVersion: item.latest }; 
+    const [err] = await api('pluginUpdate', payload);
     if (err) {
       setPluginBusy('');
       flash(tr('更新失败：') + err, 'error');
@@ -3158,7 +3275,13 @@ function SettingsCard(props) {
   };
 
   const resetCfg = async () => {
-    if (!window.confirm(tr('仅重置本插件（百通插件广场）的设置：更新策略、镜像源等恢复默认值，不影响 DSH 其他插件') + ' ' + tr('确认继续？'))) return;
+    if (!window.confirm(
+      tr('仅重置本插件（百通插件广场）的设置：更新策略、镜像源等恢复默认值，不影响 DSH 其他插件')
+      + ' '
+      + tr('操作日志会被清空，无法恢复。')
+      + ' '
+      + tr('确认继续？'),
+    )) return;
     setSaving(true);
     const [err, data] = await api('pluginResetConfig');
     setSaving(false);
@@ -3175,6 +3298,16 @@ function SettingsCard(props) {
       npmRegistry: String(data.npmRegistry || ''),
       checkUpdatesOnStart: data.checkUpdatesOnStart !== false,
     });
+    /**
+     * 🔴 重置成功后清掉前端残留（2026-10-20）：
+     *    - note / noteSeq：避免上一条提示跨重置残留；
+     *    - 诊断与日志缓存：日志文件已被后端删除，界面上的旧列表必须作废，
+     *      否则用户点进「操作日志」看到的还是重置前的条目（与磁盘不符）。
+     */
+    setNote('');
+    setDiag(null);
+    setLogs(null);
+    setLogOffset(0);
     flash(tr('已重置'));
     setShowConfig(false);
     setSection('updates');
@@ -3228,6 +3361,8 @@ function SettingsCard(props) {
     { key: 'diagnostics', label: tr('诊断'), desc: tr('环境快照：版本、运行时与 CLI 入口，排查安装问题用'), icon: <SetDiagIcon /> },
     { key: 'logs', label: tr('操作日志'), desc: tr('最近 20 次安装 / 更新 / 卸载记录'), icon: <SetLogIcon /> },
     { key: 'reset', label: tr('重置'), desc: tr('仅重置本插件（百通插件广场）的设置：更新策略、镜像源等恢复默认值，不影响 DSH 其他插件'), icon: <SetRstIcon /> },
+    // 注意：重置分区的内容区另有补充说明（含"日志会被清空"），
+    // 与这里的导航摘要不重复 —— 摘要讲范围，补充说明讲副作用。
   ];
   // 未显示时把「配置」从导航里摘掉；activeSection 用未过滤列表兜底，避免 section 停在隐藏项时崩溃
   const visibleSections = SECTIONS.filter((s) => s.key !== 'config' || showConfig);
@@ -3324,6 +3459,7 @@ function SettingsCard(props) {
                   <span className="btm-ver-old">{it.current || '—'}</span>
                   <span className="btm-ver-arrow">→</span>
                   <span className="btm-ver-new">{it.latest}</span>
+                  {it.hubRepo ? <span className="btm-ver-src" title={tr('来自插件平台')}>{it.hubRepo}</span> : null}
                 </div>
                 <button
                   type="button"
@@ -3360,7 +3496,10 @@ function SettingsCard(props) {
           </div>
         </div>
 
-      {note ? <p className="btm-status">{note}</p> : null}
+      {/* 🔴 note 只由底部 AutoToast 渲染（2026-10-20 修）：
+          这里原先还有一份 <p className="btm-status">{note}</p>，于是同一句话同时出现在
+          卡片流和浮层里；浮层 3 秒收起后，常驻那份还在，看起来像"报错不消失"。
+          提示的唯一出口是 AutoToast，删除此处的重复渲染。 */}
       {state.status === 'loading' ? <p className="btm-status">{tr('加载中…')}</p> : null}
       {state.status === 'error' ? (
         <p className="btm-status">
@@ -3482,7 +3621,9 @@ function SettingsCard(props) {
       {/* 诊断：环境快照（排查"别人电脑装不上"） */}
       {section === 'diagnostics' ? (
         <div className="btm-set-page">
-          <p className="btm-custom-desc">{tr('环境快照：版本、运行时与 CLI 入口，排查安装问题用')}</p>
+          {/* 🔴 这里不再重复渲染 desc（2026-10-20 修）：
+              分区说明已由内容区页眉 .btm-set-pagedesc 统一渲染
+              （见 activeSection.desc），此处再写一遍会在诊断页出现两行相同文案。 */}
           {diag ? (
             <>
               <ul className="btm-kv btm-set-kv">
@@ -3497,7 +3638,10 @@ function SettingsCard(props) {
                   </b>
                 </li>
                 <li><span>profile</span><b>{diag.profile}</b></li>
-                <li><span>{tr('接口地址')}</span><b>{diag.apiBase}</b></li>
+                {/* 接口地址不在此展示（2026-10-20 按用户要求）：它属于可改配置，
+                    在「配置」分区已经能看到；诊断页只留环境事实。
+                    注意 diag.apiBase 仍然由后端返回，「复制诊断信息」里也仍然带着它——
+                    排查时更需要完整快照，只是不再占用诊断页的一行。 */}
                 {diag.npmRegistry ? <li><span>{tr('npm 镜像源')}</span><b>{diag.npmRegistry}</b></li> : null}
                 {diag.proxy && Object.keys(diag.proxy).length ? (
                   <li><span>{tr('代理环境')}</span><b>{JSON.stringify(diag.proxy)}</b></li>
@@ -3741,7 +3885,9 @@ function SettingsCard(props) {
       {/* 重置：删除本地覆盖配置 */}
       {section === 'reset' ? (
         <div className="btm-set-page">
-          <p className="btm-custom-desc">{tr('删除本地覆盖配置，恢复为插件默认值')}</p>
+          <p className="btm-custom-desc">
+            {tr('删除本地覆盖配置，恢复为插件默认值；操作日志与残留的安装报错也会一并清空')}
+          </p>
           <button type="button" className="btm-btn danger" disabled={saving} onClick={resetCfg}>
             {saving ? tr('重置中…') : tr('重置')}
           </button>
@@ -3752,7 +3898,7 @@ function SettingsCard(props) {
       </div>{/* /.btm-set-body */}
 
       {/* 提示浮层：3 秒自动消失，不占据卡片流空间 */}
-      <AutoToast key={noteSeq} text={note} kind={noteKind} onDone={() => setNote('')} />
+      <AutoToast key={noteSeq} seq={noteSeq} text={note} kind={noteKind} onDone={() => setNote('')} />
     </div>
   );
 }

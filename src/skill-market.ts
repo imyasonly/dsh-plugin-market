@@ -121,6 +121,9 @@ export async function searchBaitongSkills(query: string, opts: SkillSearchOpts):
       category: String(r.category || ''),
       tags: String(r.tags || ''),
       logo: String(r.logo || ''),
+      // 下载量直接透传后端口径：真实下载量 + SkillHub 下载量（与百通门户一致）。
+      // 2026-10-20 前这里展示的数字比门户小一截，就是 SkillHub 存量没并进来；
+      // 合并只做在服务端这一处，前端不要再相加，避免口径漂移。
       downloadCount: Number(r.downloadCount) || 0,
       rating: r.rating != null ? Number(r.rating) : null,
       installed: installed.has(slug),
@@ -279,6 +282,7 @@ export async function getBaitongSkillDetail(
     category: String(detail.category || ''),
     tags: String(detail.tags || ''),
     logo: String(detail.logo || ''),
+    // 与搜索列表同一口径（平台侧合并后透传），详见上方 searchBaitongSkills 注释
     downloadCount: Number(detail.downloadCount) || 0,
     rating: detail.rating != null && detail.rating !== '' ? String(detail.rating) : '',
     size: Number(detail.size) || 0,

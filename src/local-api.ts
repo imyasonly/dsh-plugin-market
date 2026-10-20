@@ -9,10 +9,10 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { fetchBytes, fetchJson, proxyEnvSnapshot } from './http.js';
 import { getBaitongSkillDetail, installBaitongSkill, installedSlugs, listInstalledSkills, readSkillLockEntry, searchBaitongSkills, uninstallBaitongSkill, SKILL_CATEGORY_TABS } from './skill-market.js';
-import { PatchProbeUnavailableError, fetchInstallPlan, fetchLatestVersions, findPatchIdConflict, installBaitongPlugin, isPluginInstallBusy, isRegistrySpec, isSafePkgName, listPluginCategories, listPlugins, parsePluginRef, readInstalledPluginMeta, readProfileDependencies, readProfileDependenciesOf, readInstalledPluginReadme, resolveInstallSource, uninstallBaitongPlugin, withPluginInstallLock } from './plugin-market.js';
+import { PatchProbeUnavailableError, fetchInstallPlan, fetchLatestVersions, fetchPlatformVersions, findPatchIdConflict, githubShaFromSpec, installBaitongPlugin, isPluginInstallBusy, isRegistrySpec, isSafePkgName, listPluginCategories, listPlugins, parsePluginRef, readInstalledPluginMeta, readProfileDependencies, readProfileDependenciesOf, readInstalledPluginReadme, resolveInstallSource, uninstallBaitongPlugin, withPluginInstallLock, type PlatformVersionInfo } from './plugin-market.js';
 import { BOOT_ID, addDshPlugin, bundledDshEntry, currentProfile, enableInstalledPlugin, isSafeProfile, profileDir, progress, publicInstallStatus, readProfileBundles, summarizePnpmFailure, writeMinimumReleaseAgeExclude } from './dsh-cli.js';
 import { assignConfig, dshHome, publicConfig, sanitizePatch, withDefaults, writeOverlay } from './config-store.js';
-import { appendLog, clearLogs, logFilePath, readLogs, CATEGORIES, LEVELS, type LogCategory, type LogLevel } from './oplog.js';
+import { appendLog, clearLogs, logFilePath, readLogs, removeLogFile, CATEGORIES, LEVELS, type LogCategory, type LogLevel } from './oplog.js';
 import { canAutoRestart, detectRuntime, isRestartPending, markRestartPending, restartDesktopApp, scheduleRestart, servingPort, trustedRestartRequest } from './restart.js';
 import type { BaitongConfig } from './config-store.js';
 /**
@@ -342,26 +342,52 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, cfg: 
       })();
       return sendJson(res, 200, { ok: true, started: true, source, profile, from: snap.current, to: snap.latest });
     }
-    // ===== 已安装插件的「可更新」标签：批量查线上 latest =====
+    // ===== 已安装插件的「可更新」标签：两条渠道并行 =====
+    // 渠道一：npm registry latest（registry 源插件）
+    // 渠道二：插件平台版本（GitHub 源插件 —— 平台按 Release 收录，未必发到 npm，只查 npm 会永远"已是最新"）
     if (method === 'pluginLatestVersions') {
       const deps = readProfileDependencies();
       const registryDeps = deps.filter((d) => isRegistrySpec(d.spec));
+      const platformDeps = deps.filter((d) => d.repo);
       let latest: Record<string, string> = {};
+      let platform: Record<string, PlatformVersionInfo> = {};
+      let localShaByPkg: Record<string, string> = {};
       try {
-        latest = await fetchLatestVersions(registryDeps.map((d) => d.pkg), cfg);
+        const [registryOut, platformOut] = await Promise.all([
+          fetchLatestVersions(registryDeps.map((d) => d.pkg), cfg).catch(() => ({}) as Record<string, string>),
+          fetchPlatformVersions(platformDeps.map((d) => d.repo as string), cfg).catch(() => ({}) as Record<string, PlatformVersionInfo>),
+        ]);
+        latest = registryOut;
+        platform = platformOut;
+        for (const dep of platformDeps) {
+          const pinned = platform[dep.repo as string];
+          if (pinned) localShaByPkg[dep.pkg] = githubShaFromSpec(dep.spec);
+        }
       } catch {
         /* 全部失败：返回空表，前端不显示更新标签 */
       }
       const items = deps.map((d) => {
         const installed = readInstalledPluginMeta(d.pkg, d.profiles);
         const current = installed?.version ?? '';
-        const latestV = latest[d.pkg] ?? '';
+        const registryLatest = latest[d.pkg] ?? '';
+        const pinned = platform[d.repo as string];
+        // 平台渠道优先：GitHub 源安装的就是 github:owner/repo#sha，平台的 pinned_sha 才是权威
+        const latestV = pinned?.latest || registryLatest;
+        const localSha = localShaByPkg[d.pkg] ?? '';
+        // 版本号相同不代表最新：平台是按 commit sha 推进的，sha 不同同样要更新
+        const hubSha = pinned?.sha ?? '';
+        const hasUpdate = pinned
+          ? compareVersions(latestV, current) > 0 || (!!hubSha && !!localSha && hubSha !== localSha)
+          : !!(current && latestV && compareVersions(latestV, current) > 0);
         return {
           pkg: d.pkg,
           current,
           latest: latestV,
-          // 与自升级同口径：线上确实更新才亮标签
-          hasUpdate: !!(current && latestV && compareVersions(latestV, current) > 0),
+          hasUpdate,
+          // 平台渠道的更新目标：GitHub 源插件按 repo@pinnedSha 更新
+          hubRepo: pinned ? d.repo : undefined,
+          hubSha: pinned ? hubSha : undefined,
+          via: pinned ? 'platform' : registryLatest ? 'registry' : 'none',
         };
       });
       return sendJson(res, 200, { ok: true, items });
@@ -375,23 +401,37 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, cfg: 
       if (!(pkg in deps)) {
         return sendJson(res, 200, { ok: false, error: `${profile} profile 未安装 ${pkg}`, profile });
       }
-      if (!isRegistrySpec(deps[pkg])) {
-        return sendJson(res, 200, { ok: false, error: `该插件来自 ${deps[pkg]}，非 registry 源不支持自动更新`, profile });
-      }
+      const dep = deps[pkg];
       if (isPluginInstallBusy() || progress.active) {
         return sendJson(res, 409, { ok: false, error: '已有安装任务在进行中', profile });
       }
-      // 更新按钮只会在 pluginLatestVersions 已确认有新版时出现；客户端把同一快照中的
-      // 精确目标版本带回来，避免点击后重复查询 registry。后端只接受规范版本号。
+      // 更新按钮只会在 pluginLatestVersions 已确认有新版时出现；客户端把同一快照里的
+      // 精确目标带回来，避免点击后重复查询。registry 源用版本号，GitHub 源用平台 pinned sha。
+      let source: string;
       const targetVersion = String(body.targetVersion ?? url.searchParams.get('targetVersion') ?? '').trim();
-      if (!SELF_VERSION_RE.test(targetVersion)) {
-        return sendJson(res, 400, { ok: false, error: '更新目标版本无效，请刷新更新列表后重试', profile });
+      if (isRegistrySpec(dep)) {
+        if (!SELF_VERSION_RE.test(targetVersion)) {
+          return sendJson(res, 400, { ok: false, error: '更新目标版本无效，请刷新更新列表后重试', profile });
+        }
+        source = `${pkg}@${targetVersion}`;
+      } else if (/^github:/i.test(dep.trim())) {
+        // 平台当前 pinned 的 commit 就是它推荐的更新目标（install-plan 同样用它）
+        const targetSha = String(body.targetSha ?? url.searchParams.get('targetSha') ?? '').trim();
+        if (!/^[0-9a-f]{7,40}$/i.test(targetSha)) {
+          return sendJson(res, 400, { ok: false, error: '更新目标 commit 无效，请刷新更新列表后重试', profile });
+        }
+        const installedDep = readProfileDependencies().find((item) => item.pkg === pkg);
+        const repo = String((body.targetRepo ?? url.searchParams.get('targetRepo') ?? '') as string).trim() || installedDep?.repo || '';
+        if (!repo || repo !== (installedDep?.repo ?? '')) {
+          return sendJson(res, 200, { ok: false, error: '更新目标仓库与本插件安装来源不一致，已拒绝', profile });
+        }
+        source = `github:${repo}#${targetSha}`;
+      } else {
+        return sendJson(res, 200, { ok: false, error: `该插件来自 ${dep}，非 registry 非 github 源不支持自动更新`, profile });
       }
-      // 精确版本也是宿主插件管理器对 minimumReleaseAge 版本的“用户明确选择”路径。
-      const source = `${pkg}@${targetVersion}`;
       progress.error = null;
       progress.lastLine = '';
-      appendLog('info', 'update', 'update.start', `开始更新 ${pkg} → ${targetVersion}（${profile}）`);
+      appendLog('info', 'update', 'update.start', `开始更新 ${pkg} → ${source}（${profile}）`);
       void (async () => {
         try {
           await withPluginInstallLock(() => addDshPlugin(source, profile));
@@ -660,11 +700,32 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, cfg: 
       }
     }
     // ===== 重置配置：删 overlay，回包内默认值 =====
+    // 🔴 只删本插件自己的 overlay 文件（$DSH_HOME/baitong-market.json），
+    //    不碰 profile 的 cordis.patch.yml、不碰 node_modules、不碰其他插件——这是「仅重置本插件」的边界。
     if (method === 'pluginResetConfig') {
+      // 与其他写操作口径一致：只接受同源请求（面板走 POST）
+      if (!trustedRestartRequest(req)) {
+        return sendJson(res, 403, { ok: false, error: 'reset is limited to same-origin requests' });
+      }
       try {
         rmSync(join(dshHome(), 'baitong-market.json'), { force: true });
+        // 重置后的生效值 = 默认值（其中 apiBase 会优先吃 BAITONG_API_BASE 环境变量）
+        // 必须走 assignConfig 全量覆盖，否则 npmRegistry / checkUpdatesOnStart 会残留旧值，
+        // 表现为「界面说已重置、实际还在用旧镜像源」，且下一次保存会把旧值写回文件。
         assignConfig(cfg, { ...withDefaults({}) });
-        appendLog('warn', 'settings', 'settings.reset', '重置全部设置为默认值');
+        /**
+         * 🔴 必须同时清掉宿主侧残留的安装错误（2026-10-20）：
+         * progress.error 只在"下一次安装开工"时被清（见本文件各处的 beginProgress）。
+         * 用户点完重置后，pluginInstallStatus 仍把旧错误送回来，
+         * 前端据此又渲染出「安装失败：…」——看起来就像重置没生效。
+         * 重置是一次明确的状态复位，这条也必须复位。
+         */
+        progress.error = null;
+        progress.lastLine = '';
+        // 日志文件也一并删除（用户明确要求：重置要把日志清掉，而不是留一份旧记录）
+        const logRemoved = removeLogFile();
+        appendLog('warn', 'settings', 'settings.reset', '重置全部设置为默认值（仅本插件，不影响 DSH 及其他插件）'
+          + (logRemoved ? '，已删除历史日志' : ''));
         return sendJson(res, 200, { ok: true, ...publicConfig(cfg) });
       } catch (err) {
         return sendJson(res, 200, { ok: false, error: err instanceof Error ? err.message : String(err) });

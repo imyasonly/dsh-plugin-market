@@ -36,6 +36,11 @@ export interface InstalledDependency {
   pkg: string;
   spec: string;
   profiles: string[];
+  /**
+   * GitHub owner/repo（仅 spec 为 github: 形式时存在）。
+   * 插件市场的「最新版本」是按 owner/repo 索引的，npm 包名对不上 —— 没有它就查不了平台版本。
+   */
+  repo: string | null;
 }
 
 /** 已安装插件的展示元信息（读不到返回 null） */
@@ -156,6 +161,12 @@ export function githubRepoFromSpec(spec: unknown): string | null {
   return matched[1].replace(/\.git$/i, '').toLowerCase();
 }
 
+/** 从 github: 规格里取出 pinned commit sha（无 sha 的裸 github:owner/repo 返回空串） */
+export function githubShaFromSpec(spec: unknown): string {
+  const matched = GITHUB_PIN.exec(String(spec || '').trim());
+  return matched ? matched[2].toLowerCase() : '';
+}
+
 /**
  * 读已安装插件（合并所有 profile 的 dependencies）。
  * 桌面端与 web 端各自 profile，用户装在 desktop 的插件在 web 面板也要显示"已安装"，
@@ -190,7 +201,7 @@ export function readProfileDependencies(): InstalledDependency[] {
             if (!hit.profiles.includes(name)) hit.profiles.push(name);
             continue;
           }
-          byPkg.set(pkg, { pkg, spec, profiles: [name] });
+          byPkg.set(pkg, { pkg, spec, profiles: [name], repo: githubRepoFromSpec(spec) });
         }
       } catch {
         /* 跳过坏 profile */
@@ -393,6 +404,99 @@ export async function fetchLatestVersions(
 export function isRegistrySpec(spec: string): boolean {
   return !!spec && !/^(?:github:|git\+|git:|link:|file:|workspace:|https?:)/i.test(spec.trim());
 }
+
+/* ==================== 平台版本检查（GitHub 源插件的更新依据） ==================== */
+
+/** 单个已装插件在平台上的版本信息 */
+export interface PlatformVersionInfo {
+  /** 平台上架插件当前生效的版本号（取自 pinned_sha 对应的版本行 version_label） */
+  latest: string;
+  /** 平台同步用的 commit sha —— 与 profile 里装的 sha 比对即知要不要更新 */
+  sha: string;
+}
+
+/**
+ * 批量查询一批 GitHub 插件在**插件平台**上的最新版本。
+ *
+ * 为什么不能只查 npm：平台收录的插件准则来自 GitHub 仓库（见平台 BtDshPluginDiscoveryJob /
+ * BtDshPluginVersionCheckJob 按 Release 推进），安装源也是 `github:owner/repo#sha`，
+ * 大量插件根本没往 npm publish。只查 npm registry 会让这些插件永远显示"已是最新"。
+ *
+ * 走平台批量接口 `POST {apiBase}/api/bt/dsh/plugins/version-check`（body: {fullNames[]}），
+ * 一次拿回全部；旧平台没有该接口时回落到逐仓库 `GET .../versions/{owner}/{name}`。
+ *
+ * 失败语义：整批失败返回空表（前端不亮"可更新"），单仓库未收录同样不在表里。
+ *
+ * @param repos GitHub 全名列表（`owner/repo`）
+ */
+export async function fetchPlatformVersions(
+  repos: string[],
+  cfg: BaitongConfig,
+): Promise<Record<string, PlatformVersionInfo>> {
+  const unique = [...new Set(repos.map((r) => String(r || '').trim()).filter(Boolean))].slice(0, 60);
+  if (unique.length === 0) return {};
+  const valid = unique.filter((repo) => PLATFORM_REPO_RE.test(repo));
+  if (valid.length === 0) return {};
+  const opts = { timeoutMs: Math.min(cfg.timeoutMs, 8000), userAgent: cfg.userAgent };
+  const base = trimBase(cfg.apiBase);
+
+  // ① 批量接口（平台 2026-10-20 新增）：一次请求拿全
+  try {
+    const json = await fetchJson<unknown>(`${base}/api/bt/dsh/plugins/version-check`, {
+      ...opts,
+      method: 'POST',
+      body: JSON.stringify({ fullNames: valid }),
+      headers: { 'content-type': 'application/json' },
+    });
+    const rows = unwrapR<unknown>(json, {});
+    if (rows && typeof rows === 'object' && !Array.isArray(rows)) {
+      const out: Record<string, PlatformVersionInfo> = {};
+      for (const [repo, raw] of Object.entries(rows as Record<string, unknown>)) {
+        if (!raw || typeof raw !== 'object' || !PLATFORM_REPO_RE.test(repo)) continue;
+        const label = String(((raw as Record<string, unknown>).versionLabel ?? '') as string).trim();
+        const sha = String(((raw as Record<string, unknown>).sha ?? '') as string).trim();
+        if (!label && !sha) continue;
+        out[repo] = { latest: label, sha };
+      }
+      // 收录数为 0 也可能真的是"都没收录"，不能据此判定接口不存在；
+      // 是否回落到单仓库渠道由调用方策略决定，这里始终以本结果为基准。
+      return out;
+    }
+  } catch {
+    /* 老平台没有批量接口（404/403/HTML）：回落到逐仓库渠道 */
+  }
+
+  // ② 旧平台回落：逐仓库查版本历史，取首行（平台按创建时间推进）
+  const out: Record<string, PlatformVersionInfo> = {};
+  const queue = [...valid];
+  const worker = async () => {
+    for (;;) {
+      const repo = queue.shift();
+      if (repo === undefined) return;
+      const matched = PLATFORM_REPO_RE.exec(repo);
+      if (!matched) continue;
+      const url = `${base}/api/bt/dsh/plugins/versions/${encodeURIComponent(matched[1])}/${encodeURIComponent(matched[2])}`;
+      try {
+        const json = await fetchJson<unknown>(url, opts);
+        const rows = unwrapR<unknown>(json, []);
+        if (!Array.isArray(rows) || rows.length === 0) continue;
+        const top = rows[0];
+        if (!top || typeof top !== 'object') continue;
+        const label = String(((top as Record<string, unknown>).versionLabel ?? '') as string).trim();
+        const sha = String(((top as Record<string, unknown>).sha ?? '') as string).trim();
+        if (!label && !sha) continue;
+        out[repo] = { latest: label, sha };
+      } catch {
+        /* 平台不可达/未收录：留空，不阻断其余仓库 */
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: 6 }, worker));
+  return out;
+}
+
+/** 平台版本接口入参格式：owner/repo（owner 与 repo 都用 GitHub 合法字符） */
+const PLATFORM_REPO_RE = /^([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))\/([A-Za-z0-9._-]{1,100})$/;
 
 /** install-plan 校验：只校验 DSH 执行边界，不替市场内插件规定来源。 */
 export function resolveInstallSource(raw: unknown, expected: { owner: string; name: string; fullName: string }): string {

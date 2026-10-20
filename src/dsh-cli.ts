@@ -5,8 +5,8 @@
  *    超时/取消处理、安装状态快照（面板轮询用）。
  */
 import { spawn } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
-import { basename, delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { basename, delimiter, dirname, isAbsolute, join, posix, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dshHome } from './config-store.js';
 import { createProgressTracker, type ProgressTracker } from './ndjson.js';
@@ -380,6 +380,315 @@ function cmdCommandLine(argv: string[]): string {
 }
 
 /**
+ * 桌面安装的运行时根目录（resources/runtime），取不到返回 null。
+ *
+ * Windows 与 macOS 同为 Electron 打包，布局一致：
+ *   <resources>/runtime/bin             —— node 启动器（没有 npm、没有 pnpm）
+ *   <resources>/runtime/primary-runtime —— 自带 node / pnpm / python 的真实载荷
+ */
+export function desktopSupportDir(): string | null {
+  const resources = (process as unknown as { resourcesPath?: string }).resourcesPath;
+  if (!resources) return null;
+  const supportDir = join(resources, 'runtime');
+  return existsSync(join(supportDir, 'primary-runtime')) ? supportDir : null;
+}
+
+/**
+ * 桌面运行时自带的 pnpm —— 直接跑 pnpm.mjs，不依赖 PATH。
+ *
+ *   <resources>/runtime/primary-runtime/dependencies/pnpm/bin/pnpm.mjs
+ *
+ * 🔴 为什么不找「叫 pnpm 的可执行文件」：整个 resources 里没有这种文件，
+ *    只有 pnpm.cjs / pnpm.mjs 两个脚本，必须用 node 去跑。
+ */
+export function bundledPnpmEntry(): { script: string; node: string } | null {
+  const supportDir = desktopSupportDir();
+  if (!supportDir) return null;
+  const deps = join(supportDir, 'primary-runtime', 'dependencies');
+  const script = join(deps, 'pnpm', 'bin', 'pnpm.mjs');
+  if (!existsSync(script)) return null;
+  // 优先用运行时自带的 node，避免宿主进程 execPath 差异
+  const candidates = process.platform === 'win32'
+    ? [join(deps, 'node', 'bin', 'node.exe')]
+    : [join(deps, 'node', 'bin', 'node'), join(deps, 'node', 'bin', 'node.exe')];
+  const node = candidates.find((p) => existsSync(p)) ?? process.execPath;
+  return { script, node };
+}
+
+/**
+ * 给子进程准备一个「PATH 里真的有 pnpm」的 shim 目录。
+ *
+ * 🔴 为什么必须有这层（macOS 事故，2026-10-20）：
+ *   从 Finder 启动的 .app 拿不到 shell PATH，只有 /usr/bin:/bin:/usr/sbin:/sbin。
+ *   git 依赖的 prepare 脚本常写成 npm run build，pnpm 只保证自己可执行，
+ *   不保证 npm 在 PATH —— macOS 上于是必然命令找不到。Windows 因为 Explorer
+ *   启动继承 Machine 级系统 PATH，nodejs 目录本来就在，所以这个缺陷在本机测不出来。
+ *
+ * 失败返回 null（调用方保持原 env）。
+ */
+export function runtimeBinShimDir(): string | null {
+  const pnpm = bundledPnpmEntry();
+  if (!pnpm) return null;
+  const dir = join(dshHome(), 'runtimes-shim', 'bin');
+  const nodeSh = (target: string, args: string) => '#!/bin/sh\nexec "' + pnpm.node + '" ' + args + ' "' + target + '" "$@"\n';
+  // Windows 上 node 必须带 .exe 才能被 loader 找到（无扩展名会 Cannot find module）
+  const nodeExe = process.platform === 'win32' && !/\.exe$/i.test(pnpm.node) ? pnpm.node + '.exe' : pnpm.node;
+  // Windows：把路径写进 set 再用变量展开，而不是直接拼成一行 CommandLine。
+  // 🔴 原因：spawnShim 走 cmd /s /c + windowsVerbatimArguments，嵌套双引号会被 cmd
+  //    的规则剥成空串（实测报 '\"\" is not recognized'）。set + 展开可完全避开。
+  // 🔴 不要在 .cmd 里用 set + 变量展开（2026-10-20 实测两次踩坑）：
+  //    spawnShim 走 cmd /d /s /c "..."，/s 会剥掉第一层引号，导致 .cmd 内部的
+  //    set "X=path with spaces" 赋值残缺，最后报 'node' is not recognized。
+  //    直接把绝对路径写进命令行最稳（路径含空格就用引号包住单一段）。
+  const quote = (v: string) => (/[\s&|<>^]/.test(v) ? '"' + v + '"' : v);
+  // 通用转发：<node> [nodeArgs] <script> %*
+  const nodeCmd = (target: string, args: string) => [
+    '@echo off',
+    'setlocal DisableDelayedExpansion',
+    'set "ELECTRON_RUN_AS_NODE=1"',
+    quote(nodeExe) + (args ? ' ' + args : '') + ' ' + quote(target) + ' %*',
+    'exit /b %ERRORLEVEL%',
+  ].join('\r\n') + '\r\n';
+  // node 自己的转发：<node> %*（script 段为空）
+  const cmds = [
+    '@echo off',
+    'setlocal DisableDelayedExpansion',
+    'set "ELECTRON_RUN_AS_NODE=1"',
+    quote(nodeExe) + ' %*',
+    'exit /b %ERRORLEVEL%',
+  ].join('\r\n') + '\r\n';
+  // npm 命令的转发体（无系统 npm 时用）：npm <args> → pnpm <args>。
+  // pnpm 接受 run/exec/install 等同名动词，语义对 prepare 里的 npm run build 完全等价。
+  const npmViaPnpmCmd = [
+    '@echo off',
+    'setlocal DisableDelayedExpansion',
+    'set "ELECTRON_RUN_AS_NODE=1"',
+    quote(nodeExe) + ' --expose-internals ' + quote(pnpm.script) + ' %*',
+    'exit /b %ERRORLEVEL%',
+  ].join('\r\n') + '\r\n';
+  const npmViaPnpmSh = '#!/bin/sh\nexec "' + nodeExe + '" --expose-internals "' + pnpm.script + '" "$@"\n';
+  // prepare 脚本写的是 npm run build，所以 npm 也必须在 PATH 上能解析。
+  // 🔴 DSH 运行时里没有 npm（全量实测：无 npm-cli.js / corepack / npx），
+  //    自带 node 也是精简发行版（node_modules 只有 README）。
+  //    三级回退：① 系统 npm-cli.js → ② pnpm 转发（npm run X ≡ pnpm run X）。
+  const npmCli = findSystemNpmCli();
+  try {
+    mkdirSync(dir, { recursive: true });
+    // 🔴 Windows 上只写 .cmd 文件，绝不写无扩展名的 sh 脚本 ——
+    //    目录里同时存在 'pnpm'（POSIX 脚本）和 'pnpm.cmd' 会让 cmd 的 PATHEXT
+    //    解析顺序不确定，实测报 '""' is not recognized（2026-10-20 修）。
+    // node 自身也要在 PATH 上：pnpm 的子进程/exec 会从 PATH 找 node，
+    // 只靠 .cmd 里的绝对路径不够（实测 'node' is not recognized）。
+    if (process.platform === 'win32') {
+      writeFileSync(join(dir, 'pnpm.cmd'), nodeCmd(pnpm.script, '--expose-internals'), 'utf8');
+      writeFileSync(join(dir, 'node.cmd'), cmds, 'utf8');
+      if (npmCli) writeFileSync(join(dir, 'npm.cmd'), nodeCmd(npmCli, ''), 'utf8');
+      // 无系统 npm：npm run build → pnpm run build（pnpm 接受同样动词）
+      else writeFileSync(join(dir, 'npm.cmd'), npmViaPnpmCmd, 'utf8');
+    } else {
+      // POSIX：无扩展名的可执行脚本，必须 0755，否则 EACCES
+      const posixPnpm = join(dir, 'pnpm');
+      writeFileSync(posixPnpm, nodeSh(pnpm.script, '--expose-internals'), 'utf8');
+      chmodSync(posixPnpm, 0o755);
+      const posixNode = join(dir, 'node');
+      writeFileSync(posixNode, nodeSh(nodeExe, ''), 'utf8');
+      chmodSync(posixNode, 0o755);
+      // POSIX 侧也留一份 .cmd：同一仓库可能给 Windows 用（交叉场景）
+      writeFileSync(join(dir, 'pnpm.cmd'), nodeCmd(pnpm.script, '--expose-internals'), 'utf8');
+      writeFileSync(join(dir, 'node.cmd'), cmds, 'utf8');
+      if (npmCli) {
+        const posixNpm = join(dir, 'npm');
+        writeFileSync(posixNpm, nodeSh(npmCli, ''), 'utf8');
+        chmodSync(posixNpm, 0o755);
+        writeFileSync(join(dir, 'npm.cmd'), nodeCmd(npmCli, ''), 'utf8');
+      } else {
+        // 无系统 npm：转发给 pnpm（npm run X ≡ pnpm run X）
+        const posixNpm = join(dir, 'npm');
+        writeFileSync(posixNpm, npmViaPnpmSh, 'utf8');
+        chmodSync(posixNpm, 0o755);
+        writeFileSync(join(dir, 'npm.cmd'), npmViaPnpmCmd, 'utf8');
+      }
+    }
+    return dir;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 在若干候选目录里找系统 npm 的 JS 入口（npm-cli.js），找到用于造 shim。
+ *
+ * 🔴 为什么需要它：DSH 运行时自带的 node 是**精简发行版**（node_modules 里只有一个
+ * README.txt，没有 npm）。而 git 依赖的 prepare 常写成 `npm run build` —— 只补 pnpm
+ * 不够，npm 也必须能在 PATH 上解析，否则 macOS 上仍然命令找不到。
+ *
+ * 探测顺序：Homebrew → MacPorts → 官方安装器 → nvm/fnm/volta → 运行时自带 node。
+ * 返回 null 表示这台机器确实没有 npm（prepare 只能靠 pnpm 或失败）。
+ */
+export function findSystemNpmCli(): string | null {
+  const candidates: string[] = [];
+  const add = (p: string) => { if (p && !candidates.includes(p)) candidates.push(p); };
+  if (process.platform === 'darwin' || process.platform === 'linux') {
+    add('/opt/homebrew/lib/node_modules/npm/bin/npm-cli.js');
+    add('/usr/local/lib/node_modules/npm/bin/npm-cli.js');
+    add('/opt/local/lib/node_modules/npm/bin/npm-cli.js');
+    add('/usr/lib/node_modules/npm/bin/npm-cli.js');
+    // Homebrew Cellar 里的 npm（node 与 npm 拆包安装时只在这条路径上）
+    add('/opt/homebrew/opt/node/lib/node_modules/npm/bin/npm-cli.js');
+    add('/usr/local/opt/node/lib/node_modules/npm/bin/npm-cli.js');
+  } else if (process.platform === 'win32') {
+    // 官方安装器把 npm 装在 Program Files\nodejs 下；不写死盘符，
+    // 只认环境变量（读不到就跳过这个候选，还有 PATH 里的 npm 兜底）。
+    const programFiles = process.env.ProgramFiles ?? process.env['ProgramFiles(x86)'];
+    if (programFiles) add(join(programFiles, 'nodejs', 'node_modules', 'npm', 'bin', 'npm-cli.js'));
+  }
+  // nvm / fnm / volta 的用户级安装
+  const home = process.env.HOME ?? process.env.USERPROFILE ?? '';
+  if (home) {
+    // nvm（POSIX）：~/.nvm/versions/node/<ver>/lib/node_modules/npm/bin/npm-cli.js
+    // nvm-windows：%APPDATA%\nvm\v<ver>\node_modules\npm\bin\npm-cli.js（结构完全不同）
+    const nvmRoots = process.platform === 'win32'
+      ? [join(process.env.APPDATA ?? join(home, 'AppData', 'Roaming'), 'nvm'), join(home, '.nvm')]
+      : [join(home, '.nvm', 'versions', 'node')];
+    for (const root of nvmRoots) {
+      try {
+        for (const ver of readdirSync(root)) {
+          add(join(root, ver, 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'));
+          add(join(root, ver, 'node_modules', 'npm', 'bin', 'npm-cli.js'));
+        }
+      } catch { /* 无该 nvm 目录 */ }
+    }
+    // fnm（跨平台，多版本并列）
+    const fnmRoot = process.platform === 'win32'
+      ? join(process.env.APPDATA ?? join(home, 'AppData', 'Roaming'), 'fnm', 'node-versions')
+      : join(home, '.local', 'share', 'fnm', 'node-versions');
+    try {
+      for (const ver of readdirSync(fnmRoot)) {
+        add(join(fnmRoot, ver, 'installation', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'));
+        add(join(fnmRoot, ver, 'installation', 'node_modules', 'npm', 'bin', 'npm-cli.js'));
+      }
+    } catch { /* 无 fnm */ }
+    add(join(home, '.volta', 'tools', 'image', 'node', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'));
+    add(join(home, 'AppData', 'Roaming', 'npm', 'node_modules', 'npm', 'bin', 'npm-cli.js'));
+  }
+  return candidates.find((p) => existsSync(p)) ?? null;
+}
+
+/**
+ * POSIX 路径拼接（与宿主平台无关）。
+ * 🔴 为什么不用 join：平台分支判断的是「目标平台」，而 node:path.join 用的是「宿主平台」。
+ *    在 Windows 上构造 POSIX 家目录路径时，join 会产出反斜杠路径 —— 在 POSIX 上完全无效。
+ */
+const posixJoin = (...segments: string[]): string => posix.join(...segments);
+
+/**
+ * macOS 登录 PATH 的**真实来源**：/etc/paths + /etc/paths.d/*。
+ *
+ * 这两个文件正是 path_helper 的输入，也就是「终端里 PATH 长什么样」的权威定义。
+ * 直接读它，比在代码里写死一份 Homebrew/MacPorts 清单更贴合本机：
+ *   - Intel 机器是 /usr/local/bin，Apple Silicon 是 /opt/homebrew/bin；
+ *   - 用户装了 MacPorts 就是 /opt/local/bin，没装就不该凭空出现；
+ *   - 企业环境常把自建工具链写进 /etc/paths.d。
+ * 只取绝对路径行，注释与空行忽略；任何读失败都静默跳过（非 macOS 恒为空）。
+ */
+function macLoginPathDirs(): string[] {
+  if (process.platform !== 'darwin') return [];
+  const out: string[] = [];
+  const pushLines = (file: string) => {
+    try {
+      for (const line of readFileSync(file, 'utf8').split('\n')) {
+        const v = line.trim();
+        if (v && !v.startsWith('#') && isAbsolute(v)) out.push(v);
+      }
+    } catch { /* 读不到（含非 macOS 路径）就跳过 */ }
+  };
+  pushLines('/etc/paths');
+  try {
+    for (const name of readdirSync('/etc/paths.d')) pushLines(posixJoin('/etc/paths.d', name));
+  } catch { /* 无 paths.d */ }
+  return out;
+}
+
+/**
+ * 构造子进程 PATH：shim 目录优先，再补各平台「GUI 启动时拿不到」的目录。
+ *
+ * 🔴 三条平台分支都要覆盖，且**都不能写死盘符/家目录**（2026-10-20）：
+ *   - macOS：Finder 启动的 .app 只有 /usr/bin:/bin:/usr/sbin:/sbin。先读 /etc/paths(+paths.d)
+ *     还原登录 PATH，再补 Homebrew / MacPorts（bin 与 sbin 都要）与用户级包管理器。
+ *   - Linux：桌面会话同样可能只有最小 PATH，补 /snap/bin、~/.local/bin。
+ *   - Windows：Explorer 启动会继承 Machine 级 PATH，通常够用；保底只补系统目录，
+ *     且**从 SystemRoot/WINDIR/SystemDrive 推导**，绝不写死 C:\ —— 系统盘不是 C: 的机器
+ *     （或装了到别处的 Windows）写死就会指向不存在的目录。
+ */
+export function desktopChildPath(base?: string): string {
+  const parts: string[] = [];
+  const add = (p: string) => {
+    const v = (p ?? '').trim();
+    if (v && !parts.includes(v)) parts.push(v);
+  };
+  // shim 目录必须排最前：pnpm / npm 从这里出，且优先级要高于任何同名命令。
+  add(runtimeBinShimDir() ?? '');
+  // 🔴 **不要**把 resources/runtime/bin 放进 PATH（2026-10-20 实测）。
+  //    该目录里同时有无扩展名的 'node'（sh 脚本）和 'node.cmd'，Windows 的
+  //    cmd.exe 解析 PATHEXT 时会命中 '""' is not recognized。shim 已用绝对路径
+  //    固定了 node，脚本里不需要从 PATH 找 node；真需要 node 的调用方由
+  //    bundledPnpmEntry() 直接给绝对路径。
+  // 🔴 家目录取值必须按平台来（2026-10-20 修）：
+  //    Windows 上 HOME 常被 Git Bash / MSYS2 设成 POSIX 形式（/c/Users/x），
+  //    拿它去 join 会得到 /c/Users/x\AppData\Local\pnpm 这种混合路径，cmd 根本解析不了。
+  //    所以 Windows 只认 USERPROFILE（其次是 HOMEDRIVE+HOMEPATH），POSIX 才认 HOME。
+  const home = process.platform === 'win32'
+    ? (process.env.USERPROFILE
+      || (process.env.HOMEDRIVE && process.env.HOMEPATH ? process.env.HOMEDRIVE + process.env.HOMEPATH : '')
+      || '')
+    : (process.env.HOME || '');
+  if (process.platform === 'darwin') {
+    // 包管理器优先（等价于登录 shell 里 .zprofile 的 prepend），再落 /etc/paths 的系统目录
+    for (const d of [
+      '/opt/homebrew/bin', '/opt/homebrew/sbin', // Apple Silicon
+      '/usr/local/bin', '/usr/local/sbin',       // Intel
+      '/opt/local/bin', '/opt/local/sbin',       // MacPorts
+      '/Library/Apple/usr/bin',                  // Apple Silicon 系统工具（arch 等）
+    ]) add(d);
+    for (const d of macLoginPathDirs()) add(d);
+    // 标准系统目录兜底（/etc/paths 缺失时仍要能跑 ls、git 之类）
+    for (const d of ['/usr/bin', '/bin', '/usr/sbin', '/sbin']) add(d);
+    // 用户级包管理器：不依赖 shell 初始化，Finder 启动也在。
+    // 🔴 这里必须用 posix.join：home 是 POSIX 路径，宿主若在 Windows 上跑
+    //    node:path.join 会产出 \Users\x\... 这种反斜杠路径（平台分支与宿主不符时必错）。
+    if (home) {
+      for (const d of [
+        posixJoin(home, 'Library', 'pnpm'),
+        posixJoin(home, '.volta', 'bin'),
+        posixJoin(home, '.local', 'bin'),
+        posixJoin(home, '.npm-global', 'bin'),
+        posixJoin(home, '.bun', 'bin'),
+      ]) add(d);
+    }
+  } else if (process.platform === 'win32') {
+    // 保底系统目录：cmd 自身要用。盘符一律从环境变量推导，写死 C:\ 在系统盘不是 C: 时必错。
+    const winRoot = process.env.SystemRoot || process.env.WINDIR
+      || (process.env.SystemDrive ? join(process.env.SystemDrive, 'Windows') : '');
+    if (winRoot) {
+      add(join(winRoot, 'system32'));
+      add(winRoot);
+      add(join(winRoot, 'System32', 'Wbem'));
+      add(join(winRoot, 'System32', 'WindowsPowerShell', 'v1.0'));
+    }
+    // 用户级包管理器（不依赖 Explorer 继承的 Machine PATH）
+    if (home) {
+      for (const d of [join(home, 'AppData', 'Local', 'pnpm'), join(home, '.volta', 'bin'), join(home, '.bun', 'bin')]) add(d);
+    }
+  } else {
+    for (const d of ['/usr/local/bin', '/usr/local/sbin', '/usr/bin', '/bin', '/usr/sbin', '/sbin', '/snap/bin']) add(d);
+    if (home) add(posixJoin(home, '.local', 'bin')); // 同上：POSIX 路径不用宿主 join
+  }
+  const inherited = base ?? process.env.PATH ?? '';
+  for (const piece of inherited.split(delimiter)) add(piece);
+  return parts.join(delimiter);
+}
+
+/**
  * 🔴 Electron 桌面端专用 CLI 入口（2026-10-19 修）。
  *
  * 事故（用户机器实测）：桌面端里点「更新」，报
@@ -396,14 +705,16 @@ export function desktopDshEntry(): { file: string; args: string[]; env: Record<s
   if (!resources) return null;
   const cli = join(resources, 'app.asar', 'dsh', 'node_modules', '@deepseek-ai', 'dsh-desktop-host', 'lib', 'cli.js');
   if (!existsSync(cli)) return null;
-  const runtimeBin = join(resources, 'runtime', 'bin');
+  // 🔴 PATH 必须自己拼（2026-10-20）：只塞 runtime/bin 不够 —— 该目录里没有 pnpm
+  // 也没有 npm，而 git 依赖的 prepare 脚本要调它们（macOS 从 Finder 启动时连
+  // shell PATH 都没有）。desktopChildPath 会造出 pnpm shim 目录并补上常见路径。
   return {
     file: process.execPath,
     args: ['--expose-internals', cli],
     env: {
       ELECTRON_RUN_AS_NODE: '1',
       DSH_DESKTOP_NODE_EXECUTABLE: process.execPath,
-      PATH: `${runtimeBin}${delimiter}${process.env.PATH ?? ''}`,
+      PATH: desktopChildPath(),
     },
   };
 }
@@ -420,7 +731,7 @@ export function desktopDshEntry(): { file: string; args: string[]; env: Record<s
  *   ② CLI 实体：~/.dsh/profiles/node_modules/@deepseek-ai/dsh/lib/bin.js
  * 两者都存在 → 用 node 直接跑 bin.js，完全绕开 PATH。
  */
-export function bundledDshEntry(): { file: string; args: string[]; cwd: string } | null {
+export function bundledDshEntry(): { file: string; args: string[]; cwd: string; env?: Record<string, string> } | null {
   const home = dshHome();
   // ① 找一个自带 node 的 runtime（dsh-primary-runtime 是默认名，但别写死）
   let nodeExe: string | null = null;
@@ -435,12 +746,35 @@ export function bundledDshEntry(): { file: string; args: string[]; cwd: string }
       if (process.platform !== 'win32' && existsSync(candidate)) { nodeExe = candidate; break; }
     }
   } catch { /* 无 runtimes 目录 */ }
-  // ② CLI 实体（官方 shim 硬编码的就是这个路径）
-  const binJs = join(home, 'profiles', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js');
-  if (!existsSync(binJs)) return null;
+  // ② CLI 实体：优先用**桌面安装自带**的 dsh 包（app.asar 内，两个平台同源）。
+  //    🔴 旧写法只认 ~/.dsh/profiles/node_modules/@deepseek-ai/dsh/lib/bin.js —— 那是
+  //    npm 布局时代的路径，桌面安装后该位置已被移除（实测不存在），于是这个函数
+  //    永远返回 null，dshArgv 退化到裸调 dsh，完全押注 PATH。macOS 从 Finder 启动
+  //    时 PATH 残缺，必然 spawn ENOENT。
+  const binJsCandidates = [
+    join(home, 'profiles', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'),
+    join(home, 'profiles', 'node_modules', '@deepseek-ai', 'dsh-shims', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'),
+  ];
+  // ③ 再退回桌面安装自身：resourcesPath 里的 app.asar/dsh/.../dsh/lib/bin.js
+  const resources = (process as unknown as { resourcesPath?: string }).resourcesPath;
+  if (resources) {
+    binJsCandidates.push(join(resources, 'app.asar', 'dsh', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'));
+  }
+  const binJs = binJsCandidates.find((p) => existsSync(p));
+  if (!binJs) return null;
   // node 找不到时退回当前进程（桌面端进程即 Electron 的 node，能跑 JS 入口）
   const node = nodeExe ?? process.execPath;
-  return { file: node, args: [binJs], cwd: dirname(binJs) };
+  // env 必须在返回里带上：这条入口不一定经过 desktopDshEntry，PATH 补齐不能漏。
+  return {
+    file: node,
+    args: [binJs],
+    cwd: dirname(binJs),
+    env: {
+      ELECTRON_RUN_AS_NODE: '1',
+      DSH_DESKTOP_NODE_EXECUTABLE: process.execPath,
+      PATH: desktopChildPath(),
+    },
+  };
 }
 
 /** 定位当前 dsh 进程入口（优先复用本进程 node，避免 PATH 环境差异） */
@@ -629,6 +963,15 @@ export function rewritePnpmError(err: unknown): Error {
   if (/ERR_PNPM_PUBLIC_HOIST_PATTERN_DIFF/.test(text)) {
     return new Error('当前 profile 的 node_modules 由不同主版本的 pnpm 生成，安装前需要先重建依赖。');
   }
+  /**
+   * 镜像同步延迟：给出可操作的解释，而不是把 pnpm 的英文原文甩给用户。
+   * web profile 会自动换官方源重试（见 addDshPlugin 的 retryAfterRegistry）；
+   * 桌面端由宿主 pluginManager 执行、我们无法注入 registry，所以这里明确告诉用户怎么办。
+   */
+  if (isRegistrySyncMiss(text)) {
+    return new Error('该版本刚发布，当前 npm 镜像尚未同步到它（镜像同步有延迟）。'
+      + '请稍后重试，或在设置里把「npm 镜像源」切换为「npm 官方源」后再升级。');
+  }
   return err instanceof Error ? err : new Error(text);
 }
 
@@ -644,7 +987,16 @@ export interface RunOptions {
   onChunk?: (text: string) => void;
 }
 
-export async function runDshPlugin(profile: string, pluginArgs: string[]): Promise<string> {
+/** 一次 dsh plugin 调用的可选参数（镜像回退用） */
+export interface RunPluginOptions {
+  /**
+   * 覆盖本次请求的 npm registry（写进子进程的 npm_config_registry）。
+   * 留空 = 跟随 pnpm 自身配置，与历史行为一致。
+   */
+  registry?: string;
+}
+
+export async function runDshPlugin(profile: string, pluginArgs: string[], options: RunPluginOptions = {}): Promise<string> {
   if (!isSafeProfile(profile)) throw new Error(`非法 profile 名: ${profile}`);
   const target = pluginArgs[pluginArgs.length - 1] ?? '';
   if (!isSafePluginTarget(target)) throw new Error(`拒绝不安全的安装目标: ${target}`);
@@ -676,12 +1028,26 @@ export async function runDshPlugin(profile: string, pluginArgs: string[]): Promi
   } catch {
     /* 日志写不进去不能阻塞安装 */
   }
+  // 🔴 PATH 兜底（2026-10-20）：即便某个入口（web profile / 非 Electron 上下文）
+  // 没有带 env，也要保证子进程能找到 pnpm / npm。macOS 从 Finder 启动时
+  // process.env.PATH 残缺，缺这一步就跑不了 git 依赖的 prepare。
+  const mergedEnv = { ...(argv.env ?? {}), CI: 'true' } as Record<string, string>;
+  if (!mergedEnv.PATH || mergedEnv.PATH === (process.env.PATH ?? '')) mergedEnv.PATH = desktopChildPath();
+  /**
+   * 指定 registry（镜像回退用）：npm 系工具统一读 npm_config_registry，
+   * 比拼 `--registry` 到 argv 更稳 —— argv 要穿过 dsh plugin 的参数解析，
+   * 多一个未知参数可能被它拒绝。
+   */
+  if (options.registry) {
+    mergedEnv.npm_config_registry = options.registry;
+    if (logFile) appendLog(logFile, `# registry=${options.registry}`);
+  }
   try {
     return await runCommand(argv.file, [...argv.args, 'plugin', '--profile', profile, ...prepared], {
       cwd: argv.cwd,
       timeoutMs: INSTALL_TIMEOUT_MS,
       // 桌面端入口需要 ELECTRON_RUN_AS_NODE / DSH_DESKTOP_NODE_EXECUTABLE / PATH 才跑得起来
-      env: { ...(argv.env ?? {}), CI: 'true' },
+      env: mergedEnv,
       viaShell: argv.viaShell,
       detached: process.platform !== 'win32',
       onChunk: (text) => {
@@ -765,11 +1131,56 @@ export async function addDshPlugin(source: string, profile = currentProfile()): 
       return await retryAfterReleaseAge(retryErr);
     }
   };
+  /**
+   * 🔴 镜像回退（2026-10-20 用户实测）：
+   *   npmmirror 等镜像对**刚发布**的版本有同步延迟。自我升级指向的正是"刚发布"的版本，
+   *   于是必然撞上：
+   *     ERR_PNPM_NO_MATCHING_VERSION  No matching version found for <pkg>@<ver>
+   *     while fetching it from https://registry.npmmirror.com/
+   *   此时镜像上没有该版本，但官方源有 —— 换官方源重试即可成功。
+   *
+   * 判定必须严格（见 isRegistrySyncMiss），否则会把真正的版本号写错也当成镜像问题。
+   */
+  const retryAfterRegistry = async (err: unknown) => {
+    const text = err instanceof Error ? err.message : String(err);
+    if (!isRegistrySyncMiss(text)) throw rewritePnpmError(err);
+    try {
+      return await runDshPlugin(profile, ['add', source], { registry: OFFICIAL_REGISTRY });
+    } catch (retryErr) {
+      throw rewritePnpmError(retryErr);
+    }
+  };
   try {
     return await runDshPlugin(profile, ['add', source]);
   } catch (err) {
-    return await retryAfterRebuild(err);
+    try {
+      return await retryAfterRebuild(err);
+    } catch (finalErr) {
+      return await retryAfterRegistry(finalErr);
+    }
   }
+}
+
+/** 官方源：镜像同步延迟时的兜底目标 */
+export const OFFICIAL_REGISTRY = 'https://registry.npmjs.org';
+
+/**
+ * 判定"镜像还没同步到这个版本"。
+ *
+ * 必须同时满足，避免误判：
+ *   1. 错误码是 ERR_PNPM_NO_MATCHING_VERSION（版本不存在，不是网络错误）；
+ *   2. 报错里明确指出是在**非官方源**取包（from https://...）；
+ *   3. 报错给出 "The latest release ... is" 的提示 —— pnpm 在"确实有更旧版本"时才这么写，
+ *      纯打错包名不会有这句。
+ * 三者缺一不可：包名写错时同样报 NO_MATCHING_VERSION，但换源也无用，不该重试。
+ */
+export function isRegistrySyncMiss(text: string): boolean {
+  if (!/ERR_PNPM_NO_MATCHING_VERSION|No matching version found for/i.test(text)) return false;
+  if (!/The latest release of .+ is/i.test(text)) return false;
+  const from = /while fetching it from (https?:\/\/[^\s/]+)/i.exec(text);
+  if (!from) return false;
+  // 已经在官方源上找不到 → 不是镜像问题，重试无意义
+  return !/^https?:\/\/registry\.npmjs\.(?:org|com)$/i.test(from[1]);
 }
 
 /** 卸载主链：remove →（hoist 差异）重建依赖后重试 */
