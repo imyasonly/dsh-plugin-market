@@ -9,8 +9,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { fetchBytes, fetchJson, proxyEnvSnapshot } from './http.js';
 import { getBaitongSkillDetail, installBaitongSkill, installedSlugs, listInstalledSkills, readSkillLockEntry, searchBaitongSkills, uninstallBaitongSkill, SKILL_CATEGORY_TABS } from './skill-market.js';
-import { PatchProbeUnavailableError, fetchInstallPlan, fetchLatestVersions, findPatchIdConflict, installBaitongPlugin, isPluginInstallBusy, isRegistrySpec, listPluginCategories, listPlugins, parsePluginRef, readInstalledPluginMeta, readProfileDependencies, readProfileDependenciesOf, readInstalledPluginReadme, resolveInstallSource, uninstallBaitongPlugin, withPluginInstallLock } from './plugin-market.js';
-import { BOOT_ID, addDshPlugin, bundledDshEntry, currentProfile, profileDir, progress, publicInstallStatus, summarizePnpmFailure, writeMinimumReleaseAgeExclude } from './dsh-cli.js';
+import { PatchProbeUnavailableError, fetchInstallPlan, fetchLatestVersions, findPatchIdConflict, installBaitongPlugin, isPluginInstallBusy, isRegistrySpec, isSafePkgName, listPluginCategories, listPlugins, parsePluginRef, readInstalledPluginMeta, readProfileDependencies, readProfileDependenciesOf, readInstalledPluginReadme, resolveInstallSource, uninstallBaitongPlugin, withPluginInstallLock } from './plugin-market.js';
+import { BOOT_ID, addDshPlugin, bundledDshEntry, currentProfile, enableInstalledPlugin, isSafeProfile, profileDir, progress, publicInstallStatus, readProfileBundles, summarizePnpmFailure, writeMinimumReleaseAgeExclude } from './dsh-cli.js';
 import { assignConfig, dshHome, publicConfig, sanitizePatch, withDefaults, writeOverlay } from './config-store.js';
 import { appendLog, clearLogs, logFilePath, readLogs, CATEGORIES, LEVELS, type LogCategory, type LogLevel } from './oplog.js';
 import { canAutoRestart, detectRuntime, isRestartPending, markRestartPending, restartDesktopApp, scheduleRestart, servingPort, trustedRestartRequest } from './restart.js';
@@ -196,16 +196,23 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, cfg: 
     }
     if (method === 'installedPlugins') {
       // 已安装清单：跨 profile 按包名合并 + 读 package.json 元信息（同包双 profile 只列一张卡片）
+      // enabled：包在 dependencies 里还不够，必须同时出现在 dsh.profile.bundles 才会被加载。
+      // 旧版本安装路径漏了这一步，面板要能把「装了但没启用」显示出来并给一键启用。
       const deps = readProfileDependencies();
-      const items = deps.map((d) => ({
-        spec: d.spec,
-        ...(readInstalledPluginMeta(d.pkg, d.profiles) ?? {
-          pkg: d.pkg,
-          profile: d.profiles[0] ?? '',
-          profiles: d.profiles,
-          dsh: false,
-        }),
-      }));
+      const items = deps.map((d) => {
+        const bundles = new Map(d.profiles.map((p) => [p, readProfileBundles(p)]));
+        const enabled = d.profiles.some((p) => bundles.get(p)?.includes(d.pkg));
+        return {
+          spec: d.spec,
+          enabled,
+          ...(readInstalledPluginMeta(d.pkg, d.profiles) ?? {
+            pkg: d.pkg,
+            profile: d.profiles[0] ?? '',
+            profiles: d.profiles,
+            dsh: false,
+          }),
+        };
+      });
       return sendJson(res, 200, { ok: true, items, total: items.length });
     }
     if (method === 'pluginInstallPlan') {
@@ -314,7 +321,7 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, cfg: 
       // 自我升级的目标永远是「刚发布」的版本，必然落在 pnpm 供应链冷却期（默认 24h）内。
       // 提前把该版本写进 profile 的 minimumReleaseAgeExclude，避免第一次点击就失败重试。
       try {
-        writeMinimumReleaseAgeExclude(profileDir(profile), source);
+        if (profile !== 'desktop') writeMinimumReleaseAgeExclude(profileDir(profile), source);
       } catch {
         /* 写不进去就走 addDshPlugin 内部的重试兜底 */
       }
@@ -374,18 +381,23 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, cfg: 
       if (isPluginInstallBusy() || progress.active) {
         return sendJson(res, 409, { ok: false, error: '已有安装任务在进行中', profile });
       }
-      // 🔴 必须显式 @latest：pnpm add <pkg>（无版本）对已存在依赖是幂等空转
-      //（"Already up to date"），导致「更新成功」但版本没变 —— 与自升级同根因。
-      const source = `${pkg}@latest`;
+      // 更新按钮只会在 pluginLatestVersions 已确认有新版时出现；客户端把同一快照中的
+      // 精确目标版本带回来，避免点击后重复查询 registry。后端只接受规范版本号。
+      const targetVersion = String(body.targetVersion ?? url.searchParams.get('targetVersion') ?? '').trim();
+      if (!SELF_VERSION_RE.test(targetVersion)) {
+        return sendJson(res, 400, { ok: false, error: '更新目标版本无效，请刷新更新列表后重试', profile });
+      }
+      // 精确版本也是宿主插件管理器对 minimumReleaseAge 版本的“用户明确选择”路径。
+      const source = `${pkg}@${targetVersion}`;
       progress.error = null;
       progress.lastLine = '';
-      appendLog('info', 'update', 'update.start', `开始更新 ${pkg} → @latest（${profile}）`);
+      appendLog('info', 'update', 'update.start', `开始更新 ${pkg} → ${targetVersion}（${profile}）`);
       void (async () => {
         try {
           await withPluginInstallLock(() => addDshPlugin(source, profile));
           progress.error = null;
           progress.lastLine = `更新完成：${pkg}（${profile} profile），重启 DSH 后生效`;
-          appendLog('success', 'update', 'update.done', `更新 ${pkg} → @latest（${profile}）`);
+          appendLog('success', 'update', 'update.done', `更新 ${pkg} → ${targetVersion}（${profile}）`);
         } catch (err) {
           const text = err instanceof Error ? err.message : String(err);
           if (progress.error === null) progress.error = summarizePnpmFailure(text).slice(0, 800) || text.slice(0, 800);
@@ -489,6 +501,24 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, cfg: 
         }
       })();
       return sendJson(res, 200, { ok: true, started: true, pkg, profile });
+    }
+    // ===== 启用已安装但未选中的插件（DSH「立即启用」的等价物） =====
+    // 桌面端由宿主 pluginManager 负责（会写 dsh.profile.bundles 并尝试热加载）；
+    // 非桌面 profile 直接改 profile 的 bundles 列表，重启后生效。
+    if (method === 'pluginEnable') {
+      const pkg = String(body.pkg ?? url.searchParams.get('pkg') ?? '').trim();
+      const profile = String(body.profile ?? url.searchParams.get('profile') ?? '').trim() || currentProfile();
+      if (!isSafePkgName(pkg)) return sendJson(res, 400, { ok: false, error: '无效插件包名' });
+      if (!isSafeProfile(profile)) return sendJson(res, 400, { ok: false, error: '非法 profile 名' });
+      try {
+        const result = await enableInstalledPlugin(pkg, profile);
+        appendLog('success', 'install', 'install.enable', `启用 ${pkg}（${profile}）`);
+        return sendJson(res, 200, { ok: true, ...result });
+      } catch (err) {
+        const text = err instanceof Error ? err.message : String(err);
+        appendLog('error', 'install', 'install.enable.fail', `启用 ${pkg}（${profile}）失败：${text.slice(0, 300)}`);
+        return sendJson(res, 200, { ok: false, error: text });
+      }
     }
     if (method === 'pluginInstallStatus') {
       return sendJson(res, 200, {

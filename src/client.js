@@ -133,6 +133,12 @@ const EN = {
   '更新': 'Update',
   '更新中…': 'Updating…',
   '更新失败：': 'Update failed: ',
+  '启用': 'Enable',
+  '启用中…': 'Enabling…',
+  '启用失败': 'Enable failed',
+  '未启用': 'Disabled',
+  '已安装但未启用，DSH 不会加载它': 'Installed but not enabled; DSH will not load it',
+  '启用后 DSH 才会加载这个插件': 'DSH loads this plugin only after it is enabled',
   '已是最新': 'Up to date',
   '已是最新版本：': 'Already up to date: ',
   '搜索': 'Search',
@@ -273,11 +279,32 @@ function useTr() {
 }
 
 /**
+ * 报错自动收起：报错是「这一次点击」的反馈，不是常驻状态。
+ *
+ * 主页头部（VersionBadge）、广场面板（MarketPanel）、已安装视图与对话流卡片里的
+ * 报错原来只有「下一次操作」才会被覆盖，表现就是一直挂在页面上不走。设置页的
+ * 浮层（AutoToast）一直是 3s 自动消失的，这里让其余报错也统一成同一种行为，
+ * 只是停留时间给得更长 —— 报错文案通常更长，还可能带日志文件路径要抄。
+ *
+ * @param {string} message 当前报错；为空时不排定计时
+ * @param {(next: string) => void} clear 报错的 setter（如 setErr / setError）
+ * @param {number} [ms] 停留时长
+ */
+const ERROR_AUTO_CLEAR_MS = 8000;
+function useAutoClearError(message, clear, ms = ERROR_AUTO_CLEAR_MS) {
+  useEffect(() => {
+    if (!message) return undefined;
+    const id = setTimeout(() => clear(''), ms);
+    return () => clearTimeout(id);
+  }, [message, clear, ms]);
+}
+
+/**
  * 手动重启指引：**web 与桌面端重启方式完全不同**，不能共用一句话。
  *
  * runtime 由宿主给出（pluginInstallStatus / pluginRestart 的 `runtime`，即 detectRuntime）：
  *   - desktop：应用级重启，只能从系统托盘退出后重新打开；
- *   - web：进程由 `dsh web` 拉起，需在终端 Ctrl+C 后重新执行，并刷新本页。
+ *   - web：进程由命令行 `dsh web` 拉起，需在终端 Ctrl+C 后重新执行，并刷新本页。
  *
  * 拿不到 runtime 时按 web 处理：web 的指引在任何环境都不会误导，
  * 而"系统托盘"那句在 web 端是错的。
@@ -406,6 +433,8 @@ function VersionBadge() {
   const [canAuto, setCanAuto] = useState(null);
   const [manual, setManual] = useState(false);
   const aliveRef = useRef(true);
+  // 报错不常驻：8s 自动收起，新的报错重新计时
+  useAutoClearError(err, setErr);
 
   /**
    * @param mode 'open'  打开面板/定时复查：宿主侧 60s 软过期，发了新版重开面板就能看到；
@@ -682,9 +711,23 @@ function SkillCard({ skill, onInstall, onDetail, installedSlugsSet = new Set() }
 
 function InstallProgress({ status, pending }) {
   const tr = useTr();
+  // 宿主侧 progress.error 会一直保留到下一次安装开工（beginProgress 才清），
+  // 所以「安装失败」不能直接照着 status.error 渲染 —— 否则它会跨刷新常驻，
+  // 用户看到的就是"报错永远不消失"。这里按错误文本记一次已读，超时后隐藏；
+  // 文本变了（新一轮失败）重新计时，不是新的错误不受影响。
+  const errText = status && !status.active && status.error ? String(status.error) : '';
+  const [dismissed, setDismissed] = useState('');
+  useEffect(() => {
+    if (!errText) {
+      setDismissed('');
+      return undefined;
+    }
+    const id = setTimeout(() => setDismissed(errText), ERROR_AUTO_CLEAR_MS);
+    return () => clearTimeout(id);
+  }, [errText]);
   if (!status || !status.active) {
-    if (status && status.error) {
-      return <div className="btm-progress-error">{tr('安装失败：')}{status.error}</div>;
+    if (errText && dismissed !== errText) {
+      return <div className="btm-progress-error">{tr('安装失败：')}{errText}</div>;
     }
     if (!pending) return null;
     // 安装请求已受理、服务端还在做开工前检查（拉安装计划 / 依赖冲突预检，可能数秒）——
@@ -878,6 +921,7 @@ const CSS = `
 .btm-badge{align-self:center;flex:none;padding:1px 7px;border-radius:999px;font-size:10px;background:var(--dsw-alias-state-success-tertiary,#ecfdf5);color:var(--dsw-alias-state-success-primary,#047857)}
 /* 可更新徽标：琥珀色系，与已安装（绿）区分 */
 .btm-badge.is-update{background:var(--dsw-alias-state-warning-tertiary,#fffbeb);color:var(--dsw-alias-state-warning-primary,#b45309)}
+.btm-badge.is-off{background:var(--dsw-alias-bg-layer-2,#f3f4f6);color:var(--dsw-alias-label-secondary,#4b5058)}
 .btm-card-desc{flex:none;margin:10px 0 0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary,#7b8088)}
 .btm-card-foot{display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex:none;margin-top:auto;padding-top:12px;font-size:11px;line-height:17px;color:var(--dsw-alias-label-tertiary,#7b8088)}
 .btm-card-cat{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--dsw-alias-label-tertiary,#7b8088)}
@@ -1074,7 +1118,10 @@ function escapeHtml(raw) {
     .replace(/"/g, '&quot;');
 }
 
-/** 行内标记：`code` **bold** *italic* [text](url) —— 必须在转义之后调用 */
+/**
+ * 行内标记：反引号 code、双星号 bold、单星号 italic、[text](url) 链接。
+ * 必须在转义之后调用。
+ */
 function markdownInline(text) {
   return text
     .replace(/`([^`]+)`/g, (_, code) => `<code>${code}</code>`)
@@ -1644,6 +1691,7 @@ function InstalledView({ kind, keyword = '', installStatus, onChanged, onNeedRes
   const [detail, setDetail] = useState(null); // 当前打开详情的条目
   const [busyKey, setBusyKey] = useState(null); // 卸载/更新中
   const [uninstallErr, setUninstallErr] = useState('');
+  useAutoClearError(uninstallErr, setUninstallErr);
   const [latestMap, setLatestMap] = useState(() => new Map()); // pkg -> { latest, hasUpdate }
   const wasActiveRef = useRef(false);
   // 回调放 ref：父组件传的是内联箭头函数，写进 useCallback 依赖会让 load 每渲染都变 → 无限循环
@@ -1683,6 +1731,8 @@ function InstalledView({ kind, keyword = '', installStatus, onChanged, onNeedRes
             version: it.version || '',
             description: it.description || '',
             spec: it.spec || '',
+            // 装了但没进 dsh.profile.bundles ⇒ DSH 不会加载它，需要一键启用
+            enabled: it.enabled !== false,
             extra: it.pkg,
           }));
     setState({ status: 'ready', items });
@@ -1703,11 +1753,12 @@ function InstalledView({ kind, keyword = '', installStatus, onChanged, onNeedRes
     wasActiveRef.current = active;
   }, [installStatus, load]);
 
-  // 更新单插件：宿主端以 pkg@latest 走 add，绕开 pnpm 对已存在依赖的幂等空转
+  // 直接复用版本检查已取得的精确目标版本，避免点击后重复查询 registry。
   const updatePlugin = async (item) => {
     setUninstallErr('');
     setBusyKey(item.key);
-    const [err] = await api('pluginUpdate', { pkg: item.pkg, profile: item.profile });
+    const targetVersion = latestMap.get(item.pkg)?.latest || '';
+    const [err] = await api('pluginUpdate', { pkg: item.pkg, profile: item.profile, targetVersion });
     if (err) {
       setBusyKey(null);
       setUninstallErr(err);
@@ -1715,6 +1766,24 @@ function InstalledView({ kind, keyword = '', installStatus, onChanged, onNeedRes
     }
     // 异步任务交给轮询收尾；结束后 load() 会重拉 latest 表
     if (onNeedRestart) onNeedRestart();
+  };
+
+  /**
+   * 启用已安装但未生效的插件。
+   * 桌面端由宿主 pluginManager 写 dsh.profile.bundles 并尝试热加载；其余 profile 写文件，
+   * 重启后生效。成功后重拉清单，让卡片上的「未启用」徽标消失。
+   */
+  const enablePlugin = async (item) => {
+    setUninstallErr('');
+    setBusyKey(item.key);
+    const [err, data] = await api('pluginEnable', { pkg: item.pkg, profile: item.profile });
+    setBusyKey(null);
+    if (err || (data && data.ok === false)) {
+      setUninstallErr(err || data.error || tr('启用失败'));
+      return;
+    }
+    await load();
+    if (data && data.restartRequired && onNeedRestart) onNeedRestart();
   };
 
   // 在系统文件管理器中定位插件目录（explorer /select, / Finder -R / xdg-open）
@@ -1794,6 +1863,11 @@ function InstalledView({ kind, keyword = '', installStatus, onChanged, onNeedRes
                   {tr('可更新')}
                 </span>
               ) : null}
+              {kind !== 'skills' && it.enabled === false ? (
+                <span className="btm-badge is-off" title={tr('已安装但未启用，DSH 不会加载它')}>
+                  {tr('未启用')}
+                </span>
+              ) : null}
               {kind === 'skills' ? (
                 <>
                   {it.files != null ? <span>{tr('{n} 个文件', { n: it.files })}</span> : null}
@@ -1827,6 +1901,17 @@ function InstalledView({ kind, keyword = '', installStatus, onChanged, onNeedRes
                     <path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4.2l1.8 2h9A1.5 1.5 0 0 1 21 8.5V18a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18z" fill="#f5b642" />
                     <path d="M3 9.2h18v1.3H3z" fill="#e09b2d" />
                   </svg>
+                </button>
+              ) : null}
+              {kind !== 'skills' && it.enabled === false ? (
+                <button
+                  type="button"
+                  className="btm-btn primary"
+                  disabled={busyKey === it.key || !!(installStatus && installStatus.active)}
+                  onClick={() => enablePlugin(it)}
+                  title={tr('启用后 DSH 才会加载这个插件')}
+                >
+                  {busyKey === it.key ? tr('启用中…') : tr('启用')}
                 </button>
               ) : null}
               {kind !== 'skills' && latestMap.get(it.pkg) && latestMap.get(it.pkg).hasUpdate ? (
@@ -1912,6 +1997,7 @@ function MarketPanel({ ctx }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [installing, setInstalling] = useState(null);
+  useAutoClearError(error, setError);
   const [customOpen, setCustomOpen] = useState(false); // 自定义安装输入框
   const [customTarget, setCustomTarget] = useState('');
   const [status, setStatus] = useState(null);
@@ -2430,6 +2516,7 @@ function SkillSearchToolView(props) {
   const [done, setDone] = useState(() => new Set());
   const [detail, setDetail] = useState(null);
   const [err, setErr] = useState('');
+  useAutoClearError(err, setErr);
 
   const install = async (skill) => {
     setBusy(skill.slug);
@@ -2487,6 +2574,7 @@ function PluginSearchToolView(props) {
   const [done, setDone] = useState(() => new Set());
   const [note, setNote] = useState('');
   const [err, setErr] = useState('');
+  useAutoClearError(err, setErr);
   const [restartBusy, setRestartBusy] = useState(false);
   const busyRef = useRef('');
   const wasActiveRef = useRef(false);
@@ -2888,7 +2976,7 @@ function SettingsCard(props) {
     if (pluginBusy) return;
     setPluginBusy(item.pkg);
     setNote('');
-    const [err] = await api('pluginUpdate', { pkg: item.pkg, profile: item.profile });
+    const [err] = await api('pluginUpdate', { pkg: item.pkg, profile: item.profile, targetVersion: item.latest });
     if (err) {
       setPluginBusy('');
       flash(tr('更新失败：') + err, 'error');
@@ -3271,20 +3359,6 @@ function SettingsCard(props) {
             </button>
           </div>
         </div>
-
-      <div className="btm-set-actions">
-        <button
-          type="button"
-          className="btm-btn primary"
-          disabled={!state.updatable || !!busy}
-          onClick={updateAll}
-        >
-          {tr('全部更新')}
-        </button>
-        <button type="button" className="btm-btn ghost" disabled={!!busy} onClick={load}>
-          {tr('刷新')}
-        </button>
-      </div>
 
       {note ? <p className="btm-status">{note}</p> : null}
       {state.status === 'loading' ? <p className="btm-status">{tr('加载中…')}</p> : null}
@@ -3782,7 +3856,8 @@ function PlazaPage({ onClose, box, ctx }) {
             rel="noreferrer noopener"
             title="百通 · s.1100111.cn"
           >
-            <img src="/baitong-market/logo" alt="百通" />
+            {/* 品牌图，非插件头像：不走 Logo 组件的首字兜底（那套是给插件图标用的） */}
+        <img src="/baitong-market/logo" alt="百通" />
           </a>
           <span className="btm-top-title">{lookup('百通插件广场')}</span>
         </div>

@@ -14,7 +14,7 @@ import { handleApi, handleIcon, handleLogo } from './local-api.js';
 import { handleProbe as handleProbeRoute } from './probe.js';
 import { appendLog } from './oplog.js';
 import { currentPluginVersion } from './local-api.js';
-import { currentProfile } from './dsh-cli.js';
+import { currentProfile, configureDesktopPluginManager, type DesktopPluginManager } from './dsh-cli.js';
 import { INSTALL_TIMEOUT_MS } from './dsh-cli.js';
 
 export const name = 'baitong-plugin-market';
@@ -34,6 +34,7 @@ export const Config = Schema.object({
 /** Cordis 上下文最小形态（宿主注入；inject 按服务名解构回调） */
 interface HostCtx {
   tools: { register: (tool: unknown) => void };
+  get: (name: string) => unknown;
   inject: (services: string[], cb: (...c: unknown[]) => void) => void;
 }
 
@@ -56,6 +57,12 @@ function asLen(meta: unknown, key: string): number {
 export function apply(ctx: HostCtx, config: Partial<BaitongConfig> = {}): void {
   const cfg = withDefaults(config);
   assignConfig(cfg, readOverlay());
+  configureDesktopPluginManager(() => {
+    const profile = ctx.get('profileContext') as { name?: string } | undefined;
+    // pluginManager 只能操作它所属的 profile，禁止跨 profile 请求误写当前环境。
+    if (profile?.name !== 'desktop') return undefined;
+    return ctx.get('pluginManager') as DesktopPluginManager | undefined;
+  });
 
   // 系统日志：随宿主启动记一条（对齐 dsh-plugin 的做法）——保证「打开日志就有内容」，
   // 也让用户能确认插件确实被加载过、当前生效的 profile 与 apiBase。

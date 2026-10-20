@@ -1,13 +1,13 @@
 /**
- * dsh CLI 执行器：在宿主进程里 spawn `dsh plugin --profile web add`。
+ * 插件执行器：desktop 使用宿主 pluginManager，其余 profile 在宿主进程运行 dsh CLI。
  * 🔴 不能走 Agent 沙箱 shell —— 沙箱进程写不了 web profile 目录。
  * 含：pnpm ndjson 进度解析、prepare 拦截自动写 dangerouslyAllowAllBuilds 重试、
  *    超时/取消处理、安装状态快照（面板轮询用）。
  */
 import { spawn } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
-import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { basename, delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dshHome } from './config-store.js';
 import { createProgressTracker, type ProgressTracker } from './ndjson.js';
 
@@ -142,6 +142,24 @@ export function currentProfile(
   return WEB_PROFILE;
 }
 
+/**
+ * 读某个 profile 已选中的 bundle 层（`dsh.profile.bundles`）。
+ * 「装上了」= 在 dependencies 里；「启用了」= 在 bundles 里 —— DSH 把两者分开记，
+ * 只有同时成立才会被加载，所以面板要能区分这两种状态。
+ */
+export function readProfileBundles(profile: string): string[] {
+  if (!isSafeProfile(profile)) return [];
+  try {
+    const raw = JSON.parse(readFileSync(join(dshHome(), 'profiles', profile, 'package.json'), 'utf8')) as {
+      dsh?: { profile?: { bundles?: unknown } };
+    };
+    const bundles = raw.dsh?.profile?.bundles;
+    return Array.isArray(bundles) ? bundles.filter((v): v is string => typeof v === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
 /** 指定 profile 的目录（默认当前 profile，不再锁死 web） */
 export function profileDir(profile = currentProfile()): string {
   if (!isSafeProfile(profile)) throw new Error(`非法 profile 名: ${profile}`);
@@ -150,6 +168,183 @@ export function profileDir(profile = currentProfile()): string {
 
 export function webProfileDir(): string {
   return profileDir(WEB_PROFILE);
+}
+
+export interface PluginManagerResult {
+  application: string;
+  error?: { code?: string; diagnostic?: string };
+  packageResult?: { exitCode: number; timedOut?: boolean; output: string; logPath?: string };
+}
+
+export interface DesktopPluginManager {
+  installBundle(spec: string, options?: { enabled?: boolean }): Promise<PluginManagerResult>;
+  removeBundle(name: string): Promise<PluginManagerResult>;
+  listBundles?(): Promise<{ name: string; enabled: boolean; version?: string; source?: string; removable: boolean }[]>;
+  listPlugins?(): Promise<{ entryId?: string; moduleName: string; enabled: boolean; readOnlyReason?: string }[]>;
+  setPluginEnabled?(id: string, enabled: boolean): Promise<PluginManagerResult>;
+  /** 选中/取消选中一个 bundle 层（写 dsh.profile.bundles；官方插件页的「启用」用的就是它） */
+  setBundleEnabled?(name: string, enabled: boolean): Promise<PluginManagerResult>;
+}
+
+function checkManagerResult(result: PluginManagerResult): void {
+  const run = result.packageResult;
+  if (result.application === 'failed' || result.application === 'cancelled' || result.error || run?.timedOut || (run && run.exitCode !== 0)) {
+    const diagnostic = result.error?.diagnostic || run?.output || result.error?.code || result.application;
+    throw new Error(summarizePnpmFailure(diagnostic));
+  }
+}
+
+async function installDesktopBundle(manager: DesktopPluginManager, target: string): Promise<PluginManagerResult> {
+  // 🔴 全新安装必须 enabled: true。
+  // 之前这里对「首次安装」也传 enabled:false，于是 installBundle 跳过了 selectBundle，
+  // 包装进了 dependencies 却没进 profile 的 dsh.profile.bundles —— 重启 DSH 也不会加载，
+  // 用户必须去 DSH 插件页手动点一次「启用」，表现就是"装完为什么不直接启用"。
+  // 更新路径不受影响：already-installed 时下面会读回原有启用状态再重装。
+  const first = await manager.installBundle(target, { enabled: true });
+  if (first.error?.code !== 'already-installed') return first;
+  const name = /^(@[^/]+\/[^@]+|[^@]+)(?:@.*)?$/.exec(target)?.[1];
+  const bundle = (await manager.listBundles?.())?.find(row => row.name === name);
+  if (!name || !bundle) throw new Error('无法确定已安装插件的状态，更新已停止。');
+  if (!bundle.removable) throw new Error('该插件受桌面端保护，无法在运行中替换，请通过桌面端管理功能更新。');
+  const spec = bundle.source ?? profileDeps(profileDir('desktop'))?.[name];
+  // 精确版本用于失败恢复，避免恢复时又解析到新版本。
+  const restore = bundle.version && spec && !/^(?:link:|file:|github:|git|https?:)/i.test(spec)
+    ? `${name}@${bundle.version}` : spec;
+  if (!restore) throw new Error('无法读取插件原始安装来源，更新已停止。');
+  const pendingFile = join(profileDir('desktop'), '.plugin-manager', 'market-pending-updates.json');
+  let pending: Record<string, { enabled: boolean; entries?: string[] }> = {};
+  try { pending = JSON.parse(readFileSync(pendingFile, 'utf8')); } catch { /* 首次更新 */ }
+  const enabled = pending[name]?.enabled ?? bundle.enabled;
+  const savePending = () => {
+    mkdirSync(dirname(pendingFile), { recursive: true });
+    writeFileSync(pendingFile, JSON.stringify(pending, null, 2));
+  };
+  // removeBundle 可能先保存停用状态，再因运行实例无法卸载而失败。
+  // 在调用前记录原状态，让重启后的再次更新仍能恢复原来的选择。
+  const activeEntries = (await manager.listPlugins?.() ?? []).filter(row => row.moduleName === name && row.enabled);
+  if (activeEntries.some(row => !row.entryId || row.readOnlyReason) || (activeEntries.length && !manager.setPluginEnabled)) {
+    throw new Error('插件存在无法由宿主管理器停用的加载项，更新已停止。');
+  }
+  const entries = [...new Set([...(pending[name]?.entries ?? []), ...activeEntries.map(row => row.entryId!)])];
+  pending[name] = { enabled, entries };
+  savePending();
+  const restoreEntries = async () => {
+    for (const id of entries) {
+      if (!manager.setPluginEnabled) throw new Error('宿主缺少插件条目启用接口');
+      checkManagerResult(await manager.setPluginEnabled(id, true));
+    }
+  };
+  progress.lastLine = '正在停止旧版插件并准备更新…';
+  for (const row of activeEntries) checkManagerResult(await manager.setPluginEnabled!(row.entryId!, false));
+  const removed = await manager.removeBundle(name);
+  if (removed.error?.code === 'bundle-in-use') {
+    throw new Error('旧版插件仍在运行，桌面端无法热卸载。已保存更新前的启用状态，请完全退出并重新打开 DeepSeek Harness，然后再次点击该插件的更新；更新成功后会恢复原来的启用状态。');
+  }
+  checkManagerResult(removed);
+  let updated: PluginManagerResult;
+  try {
+    updated = await manager.installBundle(target, { enabled });
+    checkManagerResult(updated);
+  } catch (error) {
+    const rawReason = error instanceof Error ? error.message : String(error);
+    const reason = /ERR_PNPM_RESOLUTION_POLICY_VIOLATIONS_UNHANDLED|handleResolutionPolicyViolations callback/i.test(rawReason)
+      ? '目标版本或其依赖仍处于 pnpm minimumReleaseAge 供应链观察期；当前 DSH Desktop 内置 pnpm 无法正确处理该拦截。为保证安全未关闭策略，请等待发布满 24 小时后再更新'
+      : rawReason;
+    progress.lastLine = '更新失败，正在恢复旧版插件…';
+    try {
+      checkManagerResult(await manager.installBundle(restore, { enabled }));
+      await restoreEntries();
+      delete pending[name];
+      savePending();
+    } catch (restoreError) {
+      throw new Error(`更新失败：${reason}；恢复旧版失败：${restoreError instanceof Error ? restoreError.message : String(restoreError)}`);
+    }
+    throw new Error(`更新失败：${reason}；已恢复旧版插件`);
+  }
+  // 文件已经更新成功时，启用失败不能再尝试安装旧包覆盖新版。
+  await restoreEntries();
+  delete pending[name];
+  savePending();
+  return updated;
+}
+
+/**
+ * 启用一个已安装但未被选中的插件。
+ *
+ * DSH 把「已安装」和「已启用」分开记：依赖在 profile 的 `dependencies` 里，
+ * 生效与否看 `dsh.profile.bundles`。桌面端官方插件页装完会给一个「立即启用」按钮
+ * （内部就是 setBundleEnabled → selectBundle），本插件安装时已直接启用，
+ * 这里补的是「装过但被跳过启用 / 旧版本装完没启用」的场景。
+ *
+ * @param pkg 包名（必须已在目标 profile 的 dependencies 里）
+ * @param profile 目标 profile
+ * @returns 是否真的改动、以及是否需要重启才生效
+ */
+export async function enableInstalledPlugin(
+  pkg: string,
+  profile = currentProfile(),
+): Promise<{ pkg: string; profile: string; enabled: boolean; changed: boolean; restartRequired: boolean }> {
+  if (!isSafeProfile(profile)) throw new Error(`非法 profile 名: ${profile}`);
+  const deps = profileDeps(profileDir(profile));
+  if (!deps || !(pkg in deps)) throw new Error(`${profile} profile 未安装 ${pkg}，无法启用`);
+  if (profile === 'desktop') {
+    // 以磁盘上的 dsh.profile.bundles 为准判断"是否已启用"（这是宿主启动时读的事实），
+    // 不依赖 manager 是否可用 —— 否则在非宿主进程里会把已生效的插件误报成未登记。
+    if (readProfileBundles('desktop').includes(pkg)) {
+      return { pkg, profile, enabled: true, changed: false, restartRequired: false };
+    }
+    const manager = desktopManager();
+    if (manager?.setBundleEnabled) {
+      const result = await manager.setBundleEnabled(pkg, true);
+      checkManagerResult(result);
+      // application==='applied' 表示宿主已热加载；否则要重启
+      return { pkg, profile, enabled: true, changed: true, restartRequired: result.application !== 'applied' };
+    }
+  }
+  const dir = profileDir(profile);
+  const manifestFile = join(dir, 'package.json');
+  const manifest = JSON.parse(readFileSync(manifestFile, 'utf8')) as {
+    dsh?: { profile?: { bundles?: string[] } };
+  };
+  const previous = manifest.dsh?.profile?.bundles ?? [];
+  if (previous.includes(pkg)) return { pkg, profile, enabled: true, changed: false, restartRequired: false };
+  manifest.dsh = { ...manifest.dsh, profile: { ...manifest.dsh?.profile, bundles: [...previous, pkg] } };
+  writeFileSync(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
+  return { pkg, profile, enabled: true, changed: true, restartRequired: true };
+}
+
+// 每次操作读取服务，避免服务重载后保留失效的 manager 实例。
+let desktopManager: () => DesktopPluginManager | undefined = () => undefined;
+export function configureDesktopPluginManager(getManager: () => DesktopPluginManager | undefined): void {
+  desktopManager = getManager;
+}
+
+async function runDesktopPlugin(command: 'add' | 'remove', target: string): Promise<string> {
+  beginProgress(target);
+  progress.logPath = null;
+  progress.phase = 'installing';
+  progress.lastLine = '正在通过桌面端插件管理器处理…';
+  try {
+    const manager = desktopManager();
+    if (!manager) throw new Error('桌面端 pluginManager 服务不可用，请重启或升级 DeepSeek Harness 后重试。');
+    const result = command === 'add'
+      ? await installDesktopBundle(manager, target)
+      : await manager.removeBundle(target);
+    const run = result.packageResult;
+    progress.logPath = run?.logPath ?? null;
+    if (result.application === 'failed' || result.application === 'cancelled' || result.error || run?.timedOut || (run && run.exitCode !== 0)) {
+      const diagnostic = result.error?.diagnostic || run?.output || result.error?.code || result.application;
+      throw new Error(summarizePnpmFailure(diagnostic));
+    }
+    progress.phase = 'done';
+    progress.lastLine = '操作完成，重启 DSH 后生效';
+    return run?.output ?? progress.lastLine;
+  } catch (err) {
+    progress.error = (err instanceof Error ? err.message : String(err)).slice(0, 800);
+    throw err;
+  } finally {
+    progress.active = false;
+  }
 }
 
 /** 安装状态快照（/baitong-market method=pluginInstallStatus 轮询） */
@@ -182,6 +377,35 @@ function quoteCmdArg(arg: string): string {
 
 function cmdCommandLine(argv: string[]): string {
   return argv.map(quoteCmdArg).join(' ');
+}
+
+/**
+ * 🔴 Electron 桌面端专用 CLI 入口（2026-10-19 修）。
+ *
+ * 事故（用户机器实测）：桌面端里点「更新」，报
+ *   error: profile "desktop" is managed exclusively by the Electron application
+ * 根因：desktop 是 Electron 保留 profile，普通 CLI 入口（profiles/.../lib/bin.js，
+ * 无参数调用 runCli）在 parseDshArgs 里被 rejectElectronProfile 直接拒掉；只有
+ * 桌面端自带的 dsh-desktop-host/lib/cli.js 会带 manageDesktopProfile: true 放行，
+ * 并附带应用自带的 pnpm。所以桌面端必须走这个入口，而不是 profiles 下的通用 bin.js。
+ */
+export function desktopDshEntry(): { file: string; args: string[]; env: Record<string, string> } | null {
+  const versions = process.versions as Record<string, string | undefined>;
+  if (!versions.electron) return null; // 只有 Electron 进程（桌面端宿主）才走这条路
+  const resources = (process as unknown as { resourcesPath?: string }).resourcesPath;
+  if (!resources) return null;
+  const cli = join(resources, 'app.asar', 'dsh', 'node_modules', '@deepseek-ai', 'dsh-desktop-host', 'lib', 'cli.js');
+  if (!existsSync(cli)) return null;
+  const runtimeBin = join(resources, 'runtime', 'bin');
+  return {
+    file: process.execPath,
+    args: ['--expose-internals', cli],
+    env: {
+      ELECTRON_RUN_AS_NODE: '1',
+      DSH_DESKTOP_NODE_EXECUTABLE: process.execPath,
+      PATH: `${runtimeBin}${delimiter}${process.env.PATH ?? ''}`,
+    },
+  };
 }
 
 /**
@@ -220,7 +444,7 @@ export function bundledDshEntry(): { file: string; args: string[]; cwd: string }
 }
 
 /** 定位当前 dsh 进程入口（优先复用本进程 node，避免 PATH 环境差异） */
-export function dshArgv(input: { argv?: string[]; execArgv?: string[]; execPath?: string; argv0?: string; platform?: NodeJS.Platform } = {}): { file: string; args: string[]; cwd?: string; viaShell: boolean } {
+export function dshArgv(input: { argv?: string[]; execArgv?: string[]; execPath?: string; argv0?: string; platform?: NodeJS.Platform } = {}): { file: string; args: string[]; cwd?: string; viaShell: boolean; env?: Record<string, string> } {
   const argv = input.argv ?? process.argv;
   const execArgv = input.execArgv ?? process.execArgv;
   const execPath = input.execPath ?? process.execPath;
@@ -232,6 +456,10 @@ export function dshArgv(input: { argv?: string[]; execArgv?: string[]; execPath?
     const abs = resolve(entry);
     return { file: node, args: [...execArgv, abs], cwd: dirname(abs), viaShell: false };
   }
+  // 桌面端（Electron 宿主）优先用桌面自带 CLI：profiles 下的通用 bin.js 会拒绝
+  // 保留 profile "desktop"，且不带应用自带的 pnpm。
+  const desktop = desktopDshEntry();
+  if (desktop) return { ...desktop, viaShell: false };
   // 自身 argv 不像 CLI 入口（典型：桌面端 GUI）：先试 DSH 自带的固定位置，
   // 彻底找不到才退回 PATH 里的 dsh —— 那台没启用 PATH 注册的机器靠这步救回来。
   const bundled = bundledDshEntry();
@@ -368,6 +596,25 @@ export function writeMinimumReleaseAgeExclude(profileDirectory: string, source: 
   return true;
 }
 
+/**
+ * 从 pnpm 的 lockfile 校验报错里抠出被拦下的 `name@version`。
+ * 报错形如：
+ *   [ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION] 1 lockfile entries failed verification:
+ *     dsh-plugin@2.0.4 was published at 2026-10-18T12:06:14.059Z, ...
+ * 这些是**已装依赖**，来源规格往往不是精确版本（例如 `pkg@latest`），
+ * 所以必须按报错里列出的条目逐个写进 minimumReleaseAgeExclude。
+ */
+export function releaseAgeBlockedEntries(text: string): string[] {
+  const found: string[] = [];
+  const re = /(?:^|\s)((?:@[a-z0-9._-]+\/)?[a-z0-9][a-z0-9._-]*)@(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\s+was published at/gi;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(text)) !== null) {
+    const entry = `${match[1]}@${match[2]}`;
+    if (!found.includes(entry)) found.push(entry);
+  }
+  return found;
+}
+
 export function rewritePnpmError(err: unknown): Error {
   const text = err instanceof Error ? err.message : String(err);
   if (isPrepareBlocked(text)) {
@@ -375,6 +622,9 @@ export function rewritePnpmError(err: unknown): Error {
   }
   if (isReleaseAgeBlocked(text)) {
     return new Error('该版本刚发布，被 pnpm 供应链冷却期（minimumReleaseAge）拦截。广场安装会把该版本写入 pnpm-workspace.yaml 的 minimumReleaseAgeExclude 并重试；若仍失败请手动添加该排除项。');
+  }
+  if (/ERR_PNPM_UNEXPECTED_STORE|currently linked from the store at|ERR_PNPM_UNEXPECTED_VIRTUAL_STORE_DIR/.test(text)) {
+    return new Error('当前 profile 的 node_modules 由另一个版本的 pnpm（不同 store）生成，需要先重建依赖。');
   }
   if (/ERR_PNPM_PUBLIC_HOIST_PATTERN_DIFF/.test(text)) {
     return new Error('当前 profile 的 node_modules 由不同主版本的 pnpm 生成，安装前需要先重建依赖。');
@@ -398,6 +648,13 @@ export async function runDshPlugin(profile: string, pluginArgs: string[]): Promi
   if (!isSafeProfile(profile)) throw new Error(`非法 profile 名: ${profile}`);
   const target = pluginArgs[pluginArgs.length - 1] ?? '';
   if (!isSafePluginTarget(target)) throw new Error(`拒绝不安全的安装目标: ${target}`);
+  if (profile === 'desktop') {
+    const command = pluginArgs[0];
+    if ((command !== 'add' && command !== 'remove') || pluginArgs.length !== 2) {
+      throw new Error('desktop profile 的依赖维护必须由桌面端插件管理器处理。');
+    }
+    return runDesktopPlugin(command, target);
+  }
   const argv = dshArgv();
   const dir = profileDir(profile);
   const prepared = preparePluginArgs(dir, pluginArgs);
@@ -414,6 +671,7 @@ export async function runDshPlugin(profile: string, pluginArgs: string[]): Promi
     progress.logPath = logFile;
     appendLog(logFile, `# ${new Date().toISOString()} profile=${profile} args=${JSON.stringify(prepared)}`);
     appendLog(logFile, `# entry=${argv.file} ${JSON.stringify(argv.args)} viaShell=${argv.viaShell}`);
+    if (argv.env) appendLog(logFile, `# entryEnv=${JSON.stringify(Object.keys(argv.env))}`);
     appendLog(logFile, `# platform=${process.platform} node=${process.version} pnpm=(managed by dsh)`);
   } catch {
     /* 日志写不进去不能阻塞安装 */
@@ -422,7 +680,8 @@ export async function runDshPlugin(profile: string, pluginArgs: string[]): Promi
     return await runCommand(argv.file, [...argv.args, 'plugin', '--profile', profile, ...prepared], {
       cwd: argv.cwd,
       timeoutMs: INSTALL_TIMEOUT_MS,
-      env: { CI: 'true' },
+      // 桌面端入口需要 ELECTRON_RUN_AS_NODE / DSH_DESKTOP_NODE_EXECUTABLE / PATH 才跑得起来
+      env: { ...(argv.env ?? {}), CI: 'true' },
       viaShell: argv.viaShell,
       detached: process.platform !== 'win32',
       onChunk: (text) => {
@@ -455,9 +714,20 @@ function appendLog(file: string, text: string): void {
   }
 }
 
-/** 安装主链：add →（冷却期）放开该版本重试 →（hoist 差异）重建依赖重试 →（prepare 拦截）allowAllBuilds 重试 */
+/**
+ * 重建 profile 依赖（node_modules 由别的 pnpm/store 生成、hoist 差异等场景）。
+ * 🔴 加 `--config.minimumReleaseAge=0`：重建会把 lockfile 里**所有**条目重新过一遍
+ * 供应链冷却期校验，而 profile 里往往已经有刚发布的插件；不放开这道闸，重建必挂。
+ */
+export function rebuildProfileDeps(profile: string): Promise<string> {
+  return runDshPlugin(profile, ['install', '--no-frozen-lockfile', '--config.minimumReleaseAge=0']);
+}
+
+/** 安装主链：add →（store 不一致/hoist 差异）重建依赖 →（冷却期）放开被拦版本 →（prepare 拦截）allowAllBuilds */
 export async function addDshPlugin(source: string, profile = currentProfile()): Promise<string> {
   if (!isSafeProfile(profile)) throw new Error(`非法 profile 名: ${profile}`);
+  // 桌面端由 manager 负责锁、回滚与依赖策略，不执行 CLI 的文件改写/重建重试。
+  if (profile === 'desktop') return runDshPlugin(profile, ['add', source]);
   const dir = profileDir(profile);
   const retryAfterPrepare = async (err: unknown) => {
     const text = err instanceof Error ? err.message : String(err);
@@ -472,39 +742,46 @@ export async function addDshPlugin(source: string, profile = currentProfile()): 
   const retryAfterReleaseAge = async (err: unknown) => {
     const text = err instanceof Error ? err.message : String(err);
     if (!isReleaseAgeBlocked(text)) return await retryAfterPrepare(err);
-    // 该版本刚发布，写进 minimumReleaseAgeExclude 后原样重试即可
-    writeMinimumReleaseAgeExclude(dir, source);
+    // 被拦下的可能是「已装依赖」而不只是本次目标（lockfile 校验会扫全部条目），
+    // 所以按报错里列出的精确版本逐个写进 minimumReleaseAgeExclude，再原样重试。
+    const blocked = releaseAgeBlockedEntries(text);
+    if (blocked.length === 0) writeMinimumReleaseAgeExclude(dir, source);
+    for (const entry of blocked) writeMinimumReleaseAgeExclude(dir, entry);
     try {
       return await runDshPlugin(profile, ['add', source]);
     } catch (retryErr) {
       return await retryAfterPrepare(retryErr);
     }
   };
+  const retryAfterRebuild = async (err: unknown) => {
+    const text = err instanceof Error ? err.message : String(err);
+    if (!/ERR_PNPM_UNEXPECTED_STORE|currently linked from the store at|ERR_PNPM_PUBLIC_HOIST_PATTERN_DIFF|ERR_PNPM_UNEXPECTED_VIRTUAL_STORE_DIR/.test(text)) {
+      return await retryAfterReleaseAge(err);
+    }
+    await rebuildProfileDeps(profile);
+    try {
+      return await runDshPlugin(profile, ['add', source]);
+    } catch (retryErr) {
+      return await retryAfterReleaseAge(retryErr);
+    }
+  };
   try {
     return await runDshPlugin(profile, ['add', source]);
   } catch (err) {
-    const text = err instanceof Error ? err.message : String(err);
-    if (text.includes('ERR_PNPM_PUBLIC_HOIST_PATTERN_DIFF')) {
-      await runDshPlugin(profile, ['install', '--no-frozen-lockfile']);
-      try {
-        return await runDshPlugin(profile, ['add', source]);
-      } catch (retryErr) {
-        return await retryAfterReleaseAge(retryErr);
-      }
-    }
-    return await retryAfterReleaseAge(err);
+    return await retryAfterRebuild(err);
   }
 }
 
 /** 卸载主链：remove →（hoist 差异）重建依赖后重试 */
 export async function removeDshPlugin(pkg: string, profile = currentProfile()): Promise<string> {
   if (!isSafeProfile(profile)) throw new Error(`非法 profile 名: ${profile}`);
+  if (profile === 'desktop') return runDshPlugin(profile, ['remove', pkg]);
   try {
     return await runDshPlugin(profile, ['remove', pkg]);
   } catch (err) {
     const text = err instanceof Error ? err.message : String(err);
-    if (text.includes('ERR_PNPM_PUBLIC_HOIST_PATTERN_DIFF')) {
-      await runDshPlugin(profile, ['install', '--no-frozen-lockfile']);
+    if (/ERR_PNPM_PUBLIC_HOIST_PATTERN_DIFF|ERR_PNPM_UNEXPECTED_STORE|currently linked from the store at|ERR_PNPM_UNEXPECTED_VIRTUAL_STORE_DIR/.test(text)) {
+      await rebuildProfileDeps(profile);
       try {
         return await runDshPlugin(profile, ['remove', pkg]);
       } catch (retryErr) {
