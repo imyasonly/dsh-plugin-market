@@ -79,11 +79,11 @@ React 由 factory 的 `require('react')` 从客户端模块表注入。因此：
 
 ## 自检套件
 
-改动后跑一遍，全绿共 **432 项**：
+改动后跑一遍，全绿共 **433 项**：
 
 ```sh
 node logs/_verify/verify-all.mjs            # 一次跑完下面 11 套，并核对本文档里的项数是否与实际一致
-node logs/_verify/publish-check.mjs          # 97 项 发包前置 + 产物形态 + 隐私 + 文档红线 + 包名/主体/仓库一致性 + peer/运行时匹配 + dependencies 守卫 + 文档锚点/互链
+node logs/_verify/publish-check.mjs          # 98 项 发包前置 + 产物形态 + 隐私 + 文档红线 + 包名/主体/仓库一致性 + peer/运行时匹配 + dependencies 守卫 + 文档锚点/互链
 node logs/_verify/install-ux-check.mjs       # 35 项 进度条展示时机 + 收尾守卫
 node logs/_verify/install-fallback-check.mjs # 39 项 网络失败可读化 + 降级分支
 node logs/_verify/restart-check.mjs          # 45 项 重启三条路径（真跑）

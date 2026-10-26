@@ -86,6 +86,7 @@ const EN = {
   '没有匹配「{q}」的已安装项': 'No installed item matches "{q}"',
   '安装次数': 'Installs',
   '下载次数': 'Downloads',
+  '用户数': 'Users',
   '评分': 'Rating',
   '当前版本': 'Current version',
   '下载': 'Downloads',
@@ -735,7 +736,7 @@ function SkillCard({ skill, onInstall, onDetail, installedSlugsSet = new Set() }
       <div className="btm-card-foot">
         <span className="btm-card-cat">{skill.category || tr('技能')}</span>
         <span className="btm-card-stats">
-          {skill.downloadCount ? <span title={tr('下载次数')}>⬇ {fmtCount(skill.downloadCount)}</span> : null}
+          {skill.downloadCount ? <span title={tr('用户数')}>⬇ {fmtCount(skill.downloadCount)}</span> : null}
           {skill.rating ? <span title={tr('评分')}>★ {Number(skill.rating).toFixed(1)}</span> : null}
         </span>
       </div>
@@ -2126,11 +2127,13 @@ function MarketPanel({ ctx }) {
   const loadSkills = useCallback(async (offset = 0) => {
     if (offset === 0) { setLoading(true); setSkillEnd(false); } else { setLoadingMore(true); }
     setError('');
+    // 关键词搜索走「全库」，不再叠加分类：否则搜「患者流」时点着「医药」分类会得到空结果，
+    // 用户会以为技能不存在。分类只在空关键词（浏览）时生效，与门户搜索的直觉一致。
     const [err, data] = await api('skillSearch', {
       query: keyword,
       limit: 24,
       offset,
-      categoryId: skillCategory || undefined,
+      categoryId: keyword.trim() ? undefined : (skillCategory || undefined),
     });
     if (data && Array.isArray(data.categories)) setSkillCats(data.categories);
     if (err) setError(t('加载失败：') + err);

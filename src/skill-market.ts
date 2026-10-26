@@ -1,9 +1,12 @@
 /**
  * 百通技能市场：搜索/详情/安装/列表/卸载。
- * 数据源复用百通已上线的 AiSkillHub CLI 兼容接口（BtSkillCliController）：
- *   GET {apiBase}/api/v1/search?q=&offset=&limit=      搜索（公共技能 + 团队技能合并去重）
- *   GET {apiBase}/api/v1/skills/{slug}                 详情（含 download_url COS 预签名）
- *   GET {apiBase}/api/v1/download?slug=                下载（302 → COS 预签名 zip）
+ * 数据源（两个端点各管一段，别混用）：
+ *   搜索  GET {apiBase}/api/bt/skill/pageSkills?categoryId=&keyword=&pageNum=&pageSize=
+ *         —— 门户公开列表（@SaIgnore），唯一支持分类筛选的端点；字段见 mapPortalSkill。
+ *   详情/安装 走 AiSkillHub CLI 兼容接口（BtSkillCliController）：
+ *     GET {apiBase}/api/v1/skills/{slug}                详情（含 download_url COS 预签名）
+ *     GET {apiBase}/api/v1/download?slug=               下载（302 → COS 预签名 zip）
+ *   注：/api/v1/search 已不再用于列表 —— 它没有 categoryId 入参，且只吐前 100 条。
  * 安装：zip 下载 → 解压（拒绝路径穿越）→ 必须含 SKILL.md → 落 skillsDir → 写 lockfile。
  */
 import { copyFileSync, createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -16,12 +19,18 @@ import type { BaitongConfig } from './config-store.js';
 import { unzipToDir } from './unzip.js';
 
 /**
- * 技能页分类 Tab（2026-10-19）：百通技能库的服务端分类，id 即查询入参 categoryId。
+ * 技能页分类 Tab：百通技能库的服务端分类，id 即查询入参 categoryId。
  * 目前就这三类；后端新增分类时在此补一行即可（前端胶囊从 skillSearch 响应里拿）。
+ *
+ * 🔴 id 与名称必须一一对上（2026-10-26 修正）：早先这里把前两个写反了
+ *   —— 2059122609146032129 实际是「医药」（categoryCode=YY，2011 个技能），
+ *   2059192712453611521 才是「医疗」（categoryCode=YLQX，15 个技能）。
+ *   写反后用户点「医疗」看到的其实是医药库（且 CLI 接口还不认 categoryId），
+ *   表现就是"点哪个分类都是医药"。
  */
 export const SKILL_CATEGORY_TABS: { id: string; name: string }[] = [
-  { id: '2059122609146032129', name: '医疗' },
-  { id: '2059192712453611521', name: '医药' },
+  { id: '2059122609146032129', name: '医药' },
+  { id: '2059192712453611521', name: '医疗' },
   { id: '2059441305076809730', name: '大健康' },
 ];
 
@@ -85,18 +94,85 @@ export interface SkillSearchOpts {
   signal?: AbortSignal | null;
 }
 
+/**
+ * 技能搜索数据源（2026-10-26 起）：门户公开列表接口 `/api/bt/skill/pageSkills`。
+ *
+ * 旧实现走 CLI 兼容接口 `/api/v1/search`，但后端那个端点 **根本没有 categoryId 入参**
+ * （BtSkillCliController#search 只接 q/offset/limit）—— 分类参数被静默丢弃，
+ * 所以「医疗 / 医药 / 大健康」三个 Tab 点下去返回的都是同一批「全部」结果，
+ * 看起来就像"点哪个都是医药"。除此之外它只暴露上架技能的前 100 条（全库 2081 条），
+ * 分类筛选在里面根本无从谈起。
+ *
+ * 门户接口是 @SaIgnore 的公开端点（与门户技能列表同一口径）：
+ *   categoryId 按分类精确过滤、keyword 按名称模糊匹配、
+ *   orderByColumn=userCountWithSkillhub&isAsc=desc 与门户默认排序一致。
+ * 字段映射：skillCode→slug、skillName→name、currentVersion→version、
+ *   categoryName→category、tagNames→tags、userCount→downloadCount。
+ * ⚠️ 下载量口径：CLI 接口给的是 download_count + skillhub_download_count，
+ *   门户接口给的是 user_count + skillhub_download_count（门户「用户数」口径）。
+ *   两边名字不同、口径不同，前端只透传不自行相加（详见下方注释）。
+ */
+function pageSkillsUrl(cfg: BaitongConfig, opts: { categoryId?: string; keyword: string; pageNum: number; pageSize: number }): string {
+  const params = new URLSearchParams();
+  if (opts.categoryId) params.set('categoryId', opts.categoryId);
+  if (opts.keyword) params.set('keyword', opts.keyword);
+  params.set('pageNum', String(opts.pageNum));
+  params.set('pageSize', String(opts.pageSize));
+  // 与门户默认排序一致：按「用户数（含 SkillHub 下载量）」降序
+  params.set('orderByColumn', 'userCountWithSkillhub');
+  params.set('isAsc', 'desc');
+  return `${trimBase(cfg.apiBase)}/api/bt/skill/pageSkills?${params.toString()}`;
+}
+
+/** 门户接口单条记录 → 卡片字段（缺字段一律降级为空/0，不抛错） */
+function mapPortalSkill(raw: unknown, installed: Set<string>): {
+  slug: string;
+  name: string;
+  summary: string;
+  version: string;
+  category: string;
+  tags: string;
+  logo: string;
+  downloadCount: number;
+  rating: number | null;
+  installed: boolean;
+} | null {
+  const r = (raw ?? {}) as Record<string, unknown>;
+  const slug = String(r.skillCode || r.slug || '').trim();
+  if (!SLUG_RE.test(slug)) return null;
+  const tagNames = Array.isArray(r.tagNames) ? r.tagNames.map((t) => String(t)).filter(Boolean) : [];
+  const ratingRaw = r.rating == null || r.rating === '' ? null : Number(r.rating);
+  return {
+    slug,
+    name: String(r.skillName || r.name || slug).slice(0, 100),
+    summary: String(r.summary || r.description || '').slice(0, 300),
+    version: String(r.currentVersion || r.version || ''),
+    category: String(r.categoryName || r.category || ''),
+    tags: tagNames.length ? tagNames.join(',') : String(r.tags || ''),
+    logo: String(r.logo || ''),
+    // 门户口径「用户数」= user_count + skillhub_download_count（后端 applyPortalUserCount 已合并）。
+    // 前端只展示这一个数字，绝不与 downloadCount 相加，避免口径漂移。
+    downloadCount: Number(r.userCount) || 0,
+    rating: ratingRaw != null && Number.isFinite(ratingRaw) ? ratingRaw : null,
+    installed: installed.has(slug),
+  };
+}
+
 export async function searchBaitongSkills(query: string, opts: SkillSearchOpts): Promise<Record<string, unknown>> {
   const { cfg, limit, offset, installed } = opts;
-  const params = new URLSearchParams();
-  if (query) params.set('q', query);
-  if (opts.categoryId && /^d{1,32}$/.test(opts.categoryId)) params.set('categoryId', opts.categoryId);
-  params.set('offset', String(offset));
-  params.set('limit', String(Math.min(limit, 100)));
-  const url = `${trimBase(cfg.apiBase)}/api/v1/search?${params.toString()}`;
+  const pageSize = Math.min(Math.max(limit, 1), 100);
+  const pageNum = Math.floor(Math.max(offset, 0) / pageSize) + 1;
+  const url = pageSkillsUrl(cfg, {
+    categoryId: opts.categoryId,
+    keyword: query.trim(),
+    pageNum,
+    pageSize,
+  });
 
   const body = await fetchJson(url, { ...fetchOpts(cfg), signal: opts.signal ?? null });
-  const data = unwrapR<{ total?: number; results?: unknown[] }>(body, { total: 0, results: [] });
-  const results = Array.isArray(data.results) ? data.results : [];
+  const data = unwrapR<{ total?: number; records?: unknown[]; results?: unknown[] }>(body, { total: 0, records: [] });
+  // 门户接口是分页结构 {records,total,current,size,pages}；兼容 results 以防后端换形态
+  const results = Array.isArray(data.records) ? data.records : Array.isArray(data.results) ? data.results : [];
   interface SkillCard {
     slug: string;
     name: string;
@@ -109,26 +185,7 @@ export async function searchBaitongSkills(query: string, opts: SkillSearchOpts):
     rating: number | null;
     installed: boolean;
   }
-  const items = results.map((raw): SkillCard | null => {
-    const r = (raw ?? {}) as Record<string, unknown>;
-    const slug = String(r.slug || '');
-    if (!SLUG_RE.test(slug)) return null;
-    return {
-      slug,
-      name: String(r.name || slug).slice(0, 100),
-      summary: String(r.summary || r.description || '').slice(0, 300),
-      version: String(r.version || ''),
-      category: String(r.category || ''),
-      tags: String(r.tags || ''),
-      logo: String(r.logo || ''),
-      // 下载量直接透传后端口径：真实下载量 + SkillHub 下载量（与百通门户一致）。
-      // 2026-10-20 前这里展示的数字比门户小一截，就是 SkillHub 存量没并进来；
-      // 合并只做在服务端这一处，前端不要再相加，避免口径漂移。
-      downloadCount: Number(r.downloadCount) || 0,
-      rating: r.rating != null ? Number(r.rating) : null,
-      installed: installed.has(slug),
-    };
-  }).filter((it): it is SkillCard => !!it);
+  const items = results.map((raw): SkillCard | null => mapPortalSkill(raw, installed)).filter((it): it is SkillCard => !!it);
   const total = Number(data.total) || items.length;
   return {
     query,
