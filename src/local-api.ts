@@ -12,6 +12,7 @@ import { getBaitongSkillDetail, installBaitongSkill, installedSlugs, listInstall
 import { PatchProbeUnavailableError, fetchInstallPlan, fetchLatestVersions, fetchPlatformVersions, findPatchIdConflict, githubShaFromSpec, installBaitongPlugin, isPluginInstallBusy, isRegistrySpec, isSafePkgName, listPluginCategories, listPlugins, parsePluginRef, readInstalledPluginMeta, readProfileDependencies, readProfileDependenciesOf, readInstalledPluginReadme, resolveInstallSource, uninstallBaitongPlugin, withPluginInstallLock, type PlatformVersionInfo } from './plugin-market.js';
 import { BOOT_ID, addDshPlugin, bundledDshEntry, currentProfile, enableInstalledPlugin, isSafeProfile, profileDir, progress, publicInstallStatus, readProfileBundles, summarizePnpmFailure, writeMinimumReleaseAgeExclude } from './dsh-cli.js';
 import { assignConfig, dshHome, publicConfig, sanitizePatch, withDefaults, writeOverlay } from './config-store.js';
+import { chooseInstallRegistry, missingVersionMessage, readEffectiveRegistry, registrySpecOf } from './registry.js';
 import { appendLog, clearLogs, logFilePath, readLogs, removeLogFile, CATEGORIES, LEVELS, type LogCategory, type LogLevel } from './oplog.js';
 import { canAutoRestart, detectRuntime, isRestartPending, markRestartPending, restartDesktopApp, scheduleRestart, servingPort, trustedRestartRequest } from './restart.js';
 import type { BaitongConfig } from './config-store.js';
@@ -318,6 +319,14 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, cfg: 
       }
 
       const source = `${SELF_PKG}@${snap.latest}`;
+      // 自我升级指向的永远是「刚发布」的版本 —— 正是镜像最容易还没同步的那个。
+      // 先挑一个确实有它的源，再交给安装链（桌面端会透传给宿主的 registryPlan）。
+      const choice = await chooseInstallRegistry(SELF_PKG, snap.latest, cfg, profileDir(profile));
+      if (choice.missing) {
+        const reason = missingVersionMessage(SELF_PKG, snap.latest, choice.registry);
+        appendLog('warn', 'update', 'update.registry', reason);
+        return sendJson(res, 200, { ok: false, error: reason, profile });
+      }
       // 自我升级的目标永远是「刚发布」的版本，必然落在 pnpm 供应链冷却期（默认 24h）内。
       // 提前把该版本写进 profile 的 minimumReleaseAgeExclude，避免第一次点击就失败重试。
       try {
@@ -329,7 +338,7 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, cfg: 
       progress.lastLine = '';
       void (async () => {
         try {
-          await withPluginInstallLock(() => addDshPlugin(source, profile));
+          await withPluginInstallLock(() => addDshPlugin(source, profile, choice.registry));
           progress.error = null;
           progress.lastLine = `升级完成：${snap.current} → ${snap.latest}（${profile} profile），重启 DSH 后生效`;
           // 升级成功后缓存里的 current 还停在旧值，清掉让下次 pluginMeta 重新读
@@ -340,7 +349,7 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, cfg: 
           if (progress.error === null) progress.error = summarizePnpmFailure(text).slice(0, 800) || text.slice(0, 800);
         }
       })();
-      return sendJson(res, 200, { ok: true, started: true, source, profile, from: snap.current, to: snap.latest });
+      return sendJson(res, 200, { ok: true, started: true, source, profile, registry: choice.registry, from: snap.current, to: snap.latest });
     }
     // ===== 已安装插件的「可更新」标签：两条渠道并行 =====
     // 渠道一：npm registry latest（registry 源插件）
@@ -429,12 +438,26 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, cfg: 
       } else {
         return sendJson(res, 200, { ok: false, error: `该插件来自 ${dep}，非 registry 非 github 源不支持自动更新`, profile });
       }
+      // 🔴 安装源预检（2026-10-28）：检查源固定官方源优先，所以「有新版」可能是
+      // 镜像还没同步的版本。这里先按本机实际生效的源查一次，镜像缺版本就直接
+      // 换到真有它的源（通常是官方源）再装，而不是让 pnpm 撞
+      // ERR_PNPM_NO_MATCHING_VERSION 再回滚旧版。
+      const target = registrySpecOf(source);
+      const choice = target
+        ? await chooseInstallRegistry(target.pkg, target.version, cfg, profileDir(profile))
+        : null;
+      if (choice?.missing) {
+        const reason = missingVersionMessage(target!.pkg, target!.version, choice.registry);
+        appendLog('warn', 'update', 'update.registry', `${pkg}：${reason}`);
+        return sendJson(res, 200, { ok: false, error: reason, profile });
+      }
+      const registry = choice?.registry;
       progress.error = null;
       progress.lastLine = '';
-      appendLog('info', 'update', 'update.start', `开始更新 ${pkg} → ${source}（${profile}）`);
+      appendLog('info', 'update', 'update.start', `开始更新 ${pkg} → ${source}（${profile}，源 ${registry ?? '跟随 pnpm'}）`);
       void (async () => {
         try {
-          await withPluginInstallLock(() => addDshPlugin(source, profile));
+          await withPluginInstallLock(() => addDshPlugin(source, profile, registry));
           progress.error = null;
           progress.lastLine = `更新完成：${pkg}（${profile} profile），重启 DSH 后生效`;
           appendLog('success', 'update', 'update.done', `更新 ${pkg} → ${targetVersion}（${profile}）`);
@@ -444,7 +467,7 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, cfg: 
           appendLog('error', 'update', 'update.fail', `更新失败 ${pkg}（${profile}）：${text.slice(0, 300)}`);
         }
       })();
-      return sendJson(res, 200, { ok: true, started: true, source, profile });
+      return sendJson(res, 200, { ok: true, started: true, source, profile, registry });
     }
     // ===== 自定义安装：裸包名 / npm|pnpm 命令 / 完整 dsh 命令 =====
     if (method === 'pluginCustomInstall') {
@@ -458,12 +481,23 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, cfg: 
       if (!source) {
         return sendJson(res, 200, { ok: false, error: '无法识别的安装目标（支持裸包名 / npm|pnpm install 命令 / dsh plugin 命令）', profile });
       }
+      // 自定义安装同样先挑源：用户输入 pkg@x.y.z 时，镜像没同步就换官方源，
+      // 而不是让他对着 ERR_PNPM_NO_MATCHING_VERSION 自己猜。
+      const customTarget = registrySpecOf(source);
+      const customChoice = customTarget
+        ? await chooseInstallRegistry(customTarget.pkg, customTarget.version, cfg, profileDir(profile))
+        : null;
+      if (customChoice?.missing) {
+        const reason = missingVersionMessage(customTarget!.pkg, customTarget!.version, customChoice.registry);
+        appendLog('warn', 'install', 'install.custom.registry', reason);
+        return sendJson(res, 200, { ok: false, error: reason, profile });
+      }
       progress.error = null;
       progress.lastLine = '';
-      appendLog('info', 'install', 'install.custom.start', `开始自定义安装 ${source}（${profile}）`);
+      appendLog('info', 'install', 'install.custom.start', `开始自定义安装 ${source}（${profile}，源 ${customChoice?.registry ?? '跟随 pnpm'}）`);
       void (async () => {
         try {
-          await withPluginInstallLock(() => addDshPlugin(source, profile));
+          await withPluginInstallLock(() => addDshPlugin(source, profile, customChoice?.registry));
           progress.error = null;
           progress.lastLine = `安装完成：${source}（${profile} profile），重启 DSH 后生效`;
           appendLog('success', 'install', 'install.custom.done', `自定义安装 ${source}（${profile}）`);
@@ -623,6 +657,8 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, cfg: 
         profile: currentProfile(),
         apiBase: cfg.apiBase,
         npmRegistry: cfg.npmRegistry,
+        // 实际生效的安装源（设置留空时来自 ~/.npmrc）—— 排查"检查有新版却装不上"时看这个
+        effectiveRegistry: readEffectiveRegistry(profileDir(currentProfile())),
         proxy: proxyEnvSnapshot(),
         dshVersion: toolVersion('dsh', ['--version']) ?? dshVersionFromEntry(entry),
         pnpmVersion: toolVersion('pnpm', ['--version']),

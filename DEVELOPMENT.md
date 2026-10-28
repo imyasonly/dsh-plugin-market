@@ -49,6 +49,7 @@ dsh --profile desktop --dump-config | grep -A4 baitong
 | `src/plugin-market.ts` | 百通插件 API + install-plan 校验链 + 冲突预检 |
 | `src/skill-market.ts` | 百通技能 API（CLI 兼容接口）+ zip 安装/卸载 + lockfile |
 | `src/dsh-cli.ts` | spawn `dsh plugin add` + pnpm ndjson 进度 + allowBuilds 重试 |
+| `src/registry.ts` | 安装源挑选：读本机 `.npmrc` 实际生效的 registry、探测某源是否有目标版本、镜像未同步时换源 |
 | `src/ndjson.ts` | pnpm ndjson 进度解析 |
 | `src/unzip.ts` | zip 解压（中央目录定位，zip-slip 防护） |
 | `src/restart.ts` | 一键重启 DSH（桌面端 Electron / web 进程） |
@@ -79,11 +80,11 @@ React 由 factory 的 `require('react')` 从客户端模块表注入。因此：
 
 ## 自检套件
 
-改动后跑一遍，全绿共 **433 项**：
+改动后跑一遍，全绿共 **443 项**：
 
 ```sh
 node logs/_verify/verify-all.mjs            # 一次跑完下面 11 套，并核对本文档里的项数是否与实际一致
-node logs/_verify/publish-check.mjs          # 98 项 发包前置 + 产物形态 + 隐私 + 文档红线 + 包名/主体/仓库一致性 + peer/运行时匹配 + dependencies 守卫 + 文档锚点/互链
+node logs/_verify/publish-check.mjs          # 100 项 发包前置 + 产物形态 + 隐私 + 文档红线 + 包名/主体/仓库一致性 + peer/运行时匹配 + dependencies 守卫 + 文档锚点/互链
 node logs/_verify/install-ux-check.mjs       # 35 项 进度条展示时机 + 收尾守卫
 node logs/_verify/install-fallback-check.mjs # 39 项 网络失败可读化 + 降级分支
 node logs/_verify/restart-check.mjs          # 45 项 重启三条路径（真跑）
@@ -93,7 +94,7 @@ node logs/_verify/platform-check.mjs         # 24 项 Windows/macOS/Linux 子进
 node logs/_verify/toast-check.mjs            # 19 项 提示条单一出口 + AutoToast 计时确定性 + 关面板不残留
 node logs/_verify/install-error-check.mjs    # 23 项 安装报错已读表在模块级（关面板重开不复活）+ 主页轮询不回填 + 新一轮失败仍提示
 node logs/_verify/settings-desc-check.mjs    # 18 项 设置分区说明单一渲染点（诊断页不再重复一行）+ 诊断页字段集合（不含接口地址）
-node logs/_verify/registry-fallback-check.mjs # 22 项 自我升级镜像同步延迟自动换官方源（不误判）+ 重置文案声明"日志会被清空"
+node logs/_verify/registry-fallback-check.mjs # 30 项 安装源挑选 + 镜像同步延迟自动换官方源（web/桌面/市场/自定义四条入口）+ 回退顺序回归 + 重置文案声明"日志会被清空"
 ```
 
 全部为离线静态 + 行为级断言，可直接跑；临时产物一律放 `logs/_verify/_tmp/`。

@@ -10,6 +10,7 @@ import { basename, delimiter, dirname, isAbsolute, join, posix, resolve } from '
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dshHome } from './config-store.js';
 import { createProgressTracker, type ProgressTracker } from './ndjson.js';
+import { normalizeRegistry, OFFICIAL_REGISTRY } from './registry.js';
 
 export const WEB_PROFILE = 'web';
 export const INSTALL_TIMEOUT_MS = Number(process.env.BAITONG_INSTALL_TIMEOUT_MS) || 15 * 60 * 1000;
@@ -176,8 +177,19 @@ export interface PluginManagerResult {
   packageResult?: { exitCode: number; timedOut?: boolean; output: string; logPath?: string };
 }
 
+/** 宿主 installBundle 的可选项（与 app.asar 里的 InstallBundleOptions 对齐，只列我们会传的） */
+export interface DesktopInstallOptions {
+  enabled?: boolean;
+  /**
+   * 首选 registry。宿主的 registryPlan 从它开始问，遇到「没有这个包或版本」
+   * （= 镜像还没同步）会自动转去 fallbackRegistries，所以我们只需要把
+   * 「确实有这个版本的那个源」放第一位，回退由宿主完成。
+   */
+  registry?: string;
+}
+
 export interface DesktopPluginManager {
-  installBundle(spec: string, options?: { enabled?: boolean }): Promise<PluginManagerResult>;
+  installBundle(spec: string, options?: DesktopInstallOptions): Promise<PluginManagerResult>;
   removeBundle(name: string): Promise<PluginManagerResult>;
   listBundles?(): Promise<{ name: string; enabled: boolean; version?: string; source?: string; removable: boolean }[]>;
   listPlugins?(): Promise<{ entryId?: string; moduleName: string; enabled: boolean; readOnlyReason?: string }[]>;
@@ -194,13 +206,34 @@ function checkManagerResult(result: PluginManagerResult): void {
   }
 }
 
-async function installDesktopBundle(manager: DesktopPluginManager, target: string): Promise<PluginManagerResult> {
+/** 从宿主返回里拼出可用于判定的原始诊断文本（错误对象优先，其次 pnpm 输出） */
+function desktopDiagnostic(result: PluginManagerResult): string {
+  return result.error?.diagnostic || result.packageResult?.output || result.error?.code || result.application || '';
+}
+
+async function installDesktopBundle(manager: DesktopPluginManager, target: string, registry?: string): Promise<PluginManagerResult> {
+  const options: DesktopInstallOptions = registry ? { enabled: true, registry } : { enabled: true };
+  /**
+   * 🔴 桌面端的镜像回退（2026-10-28）：
+   *   宿主的 registryPlan 只在「配置源集合内」回退（默认 {null, npmmirror}）。
+   *   用户配了腾讯/清华这类自定义镜像时，计划里只有它自己一个源，
+   *   「镜像还没同步」仍然会直接失败。所以这里自己再兜一层：
+   *   认出镜像同步延迟就换官方源重试一次，不把错误甩给用户。
+   */
+  const installWithFallback = async (spec: string, opts: DesktopInstallOptions): Promise<PluginManagerResult> => {
+    const first = await manager.installBundle(spec, opts);
+    const current = normalizeRegistry(opts.registry ?? '');
+    if (current === OFFICIAL_REGISTRY) return first;
+    if (!isRegistrySyncMiss(desktopDiagnostic(first))) return first;
+    progress.lastLine = '镜像尚未同步该版本，正在改用 npm 官方源重试…';
+    return manager.installBundle(spec, { ...opts, registry: OFFICIAL_REGISTRY });
+  };
   // 🔴 全新安装必须 enabled: true。
   // 之前这里对「首次安装」也传 enabled:false，于是 installBundle 跳过了 selectBundle，
   // 包装进了 dependencies 却没进 profile 的 dsh.profile.bundles —— 重启 DSH 也不会加载，
   // 用户必须去 DSH 插件页手动点一次「启用」，表现就是"装完为什么不直接启用"。
   // 更新路径不受影响：already-installed 时下面会读回原有启用状态再重装。
-  const first = await manager.installBundle(target, { enabled: true });
+  const first = await installWithFallback(target, options);
   if (first.error?.code !== 'already-installed') return first;
   const name = /^(@[^/]+\/[^@]+|[^@]+)(?:@.*)?$/.exec(target)?.[1];
   const bundle = (await manager.listBundles?.())?.find(row => row.name === name);
@@ -243,7 +276,7 @@ async function installDesktopBundle(manager: DesktopPluginManager, target: strin
   checkManagerResult(removed);
   let updated: PluginManagerResult;
   try {
-    updated = await manager.installBundle(target, { enabled });
+    updated = await installWithFallback(target, { ...options, enabled });
     checkManagerResult(updated);
   } catch (error) {
     const rawReason = error instanceof Error ? error.message : String(error);
@@ -252,7 +285,7 @@ async function installDesktopBundle(manager: DesktopPluginManager, target: strin
       : rawReason;
     progress.lastLine = '更新失败，正在恢复旧版插件…';
     try {
-      checkManagerResult(await manager.installBundle(restore, { enabled }));
+      checkManagerResult(await manager.installBundle(restore, { ...options, enabled }));
       await restoreEntries();
       delete pending[name];
       savePending();
@@ -319,7 +352,7 @@ export function configureDesktopPluginManager(getManager: () => DesktopPluginMan
   desktopManager = getManager;
 }
 
-async function runDesktopPlugin(command: 'add' | 'remove', target: string): Promise<string> {
+async function runDesktopPlugin(command: 'add' | 'remove', target: string, registry?: string): Promise<string> {
   beginProgress(target);
   progress.logPath = null;
   progress.phase = 'installing';
@@ -328,7 +361,7 @@ async function runDesktopPlugin(command: 'add' | 'remove', target: string): Prom
     const manager = desktopManager();
     if (!manager) throw new Error('桌面端 pluginManager 服务不可用，请重启或升级 DeepSeek Harness 后重试。');
     const result = command === 'add'
-      ? await installDesktopBundle(manager, target)
+      ? await installDesktopBundle(manager, target, registry)
       : await manager.removeBundle(target);
     const run = result.packageResult;
     progress.logPath = run?.logPath ?? null;
@@ -969,8 +1002,8 @@ export function rewritePnpmError(err: unknown): Error {
    * 桌面端由宿主 pluginManager 执行、我们无法注入 registry，所以这里明确告诉用户怎么办。
    */
   if (isRegistrySyncMiss(text)) {
-    return new Error('该版本刚发布，当前 npm 镜像尚未同步到它（镜像同步有延迟）。'
-      + '请稍后重试，或在设置里把「npm 镜像源」切换为「npm 官方源」后再升级。');
+    return new Error('该版本刚发布，当前 npm 镜像尚未同步到它（镜像同步有延迟），'
+      + '官方源上也没有取到。请稍后重试，或在设置里把「安装源」切换为「npm 官方源」后再升级。');
   }
   return err instanceof Error ? err : new Error(text);
 }
@@ -1005,7 +1038,7 @@ export async function runDshPlugin(profile: string, pluginArgs: string[], option
     if ((command !== 'add' && command !== 'remove') || pluginArgs.length !== 2) {
       throw new Error('desktop profile 的依赖维护必须由桌面端插件管理器处理。');
     }
-    return runDesktopPlugin(command, target);
+    return runDesktopPlugin(command, target, options.registry);
   }
   const argv = dshArgv();
   const dir = profileDir(profile);
@@ -1089,18 +1122,30 @@ export function rebuildProfileDeps(profile: string): Promise<string> {
   return runDshPlugin(profile, ['install', '--no-frozen-lockfile', '--config.minimumReleaseAge=0']);
 }
 
-/** 安装主链：add →（store 不一致/hoist 差异）重建依赖 →（冷却期）放开被拦版本 →（prepare 拦截）allowAllBuilds */
-export async function addDshPlugin(source: string, profile = currentProfile()): Promise<string> {
+/**
+ * 安装主链：add →（store 不一致/hoist 差异）重建依赖 →（冷却期）放开被拦版本 →（prepare 拦截）allowAllBuilds
+ * →（镜像未同步）换源重试。
+ *
+ * `registry`：本次安装首选的 npm 源（由 registry.ts 的 chooseInstallRegistry 预先挑好）。
+ *   - web 等 CLI profile：写进子进程的 npm_config_registry；
+ *   - desktop：透传给宿主 installBundle 的 registry 选项（宿主的 registryPlan 会在
+ *     「没有这个版本」时自动转去 fallbackRegistries，所以传官方源即可完成回退）。
+ * 不传 = 跟随 pnpm 自身配置，与历史行为一致。
+ */
+export async function addDshPlugin(source: string, profile = currentProfile(), registry?: string): Promise<string> {
   if (!isSafeProfile(profile)) throw new Error(`非法 profile 名: ${profile}`);
+  const run = (target: string, override?: string) =>
+    runDshPlugin(profile, ['add', target], override ? { registry: override } : {});
   // 桌面端由 manager 负责锁、回滚与依赖策略，不执行 CLI 的文件改写/重建重试。
-  if (profile === 'desktop') return runDshPlugin(profile, ['add', source]);
+  if (profile === 'desktop') return run(source, registry);
   const dir = profileDir(profile);
   const retryAfterPrepare = async (err: unknown) => {
     const text = err instanceof Error ? err.message : String(err);
     if (!isPrepareBlocked(text)) throw rewritePnpmError(err);
     writeDangerouslyAllowAllBuilds(dir);
     try {
-      return await runDshPlugin(profile, ['add', source]);
+      // 重试必须沿用本次挑好的源，否则会掉回 pnpm 自身配置（可能还是没同步的那个镜像）
+      return await run(source, registry);
     } catch (retryErr) {
       throw rewritePnpmError(retryErr);
     }
@@ -1114,7 +1159,7 @@ export async function addDshPlugin(source: string, profile = currentProfile()): 
     if (blocked.length === 0) writeMinimumReleaseAgeExclude(dir, source);
     for (const entry of blocked) writeMinimumReleaseAgeExclude(dir, entry);
     try {
-      return await runDshPlugin(profile, ['add', source]);
+      return await run(source, registry);
     } catch (retryErr) {
       return await retryAfterPrepare(retryErr);
     }
@@ -1126,43 +1171,47 @@ export async function addDshPlugin(source: string, profile = currentProfile()): 
     }
     await rebuildProfileDeps(profile);
     try {
-      return await runDshPlugin(profile, ['add', source]);
+      return await run(source, registry);
     } catch (retryErr) {
       return await retryAfterReleaseAge(retryErr);
     }
   };
   /**
-   * 🔴 镜像回退（2026-10-20 用户实测）：
+   * 🔴 镜像回退（2026-10-20 用户实测；2026-10-28 修好执行顺序）：
    *   npmmirror 等镜像对**刚发布**的版本有同步延迟。自我升级指向的正是"刚发布"的版本，
    *   于是必然撞上：
    *     ERR_PNPM_NO_MATCHING_VERSION  No matching version found for <pkg>@<ver>
    *     while fetching it from https://registry.npmmirror.com/
    *   此时镜像上没有该版本，但官方源有 —— 换官方源重试即可成功。
    *
-   * 判定必须严格（见 isRegistrySyncMiss），否则会把真正的版本号写错也当成镜像问题。
+   * 🔴 顺序事故：这段以前放在 retryAfterRebuild **之后**，而那条链的叶子会调用
+   *   rewritePnpmError 把 pnpm 原文换成中文文案 —— 等这里拿到时
+   *   ERR_PNPM_NO_MATCHING_VERSION 已经不在了，isRegistrySyncMiss 恒为 false，
+   *   于是这段回退从未真正执行过（web profile 也一直在撞同一堵墙）。
+   *   现在它排在最前，直接对**原始错误**判定。
    */
-  const retryAfterRegistry = async (err: unknown) => {
-    const text = err instanceof Error ? err.message : String(err);
-    if (!isRegistrySyncMiss(text)) throw rewritePnpmError(err);
-    try {
-      return await runDshPlugin(profile, ['add', source], { registry: OFFICIAL_REGISTRY });
-    } catch (retryErr) {
-      throw rewritePnpmError(retryErr);
-    }
-  };
   try {
-    return await runDshPlugin(profile, ['add', source]);
+    return await run(source, registry);
   } catch (err) {
+    const text = err instanceof Error ? err.message : String(err);
+    if (isRegistrySyncMiss(text)) {
+      // 换官方源重试；官方源也没有该版本才放弃 —— 此时不再走重建链（重建解决不了"没有这个版本"）
+      try {
+        return await run(source, OFFICIAL_REGISTRY);
+      } catch (retryErr) {
+        throw rewritePnpmError(retryErr);
+      }
+    }
     try {
       return await retryAfterRebuild(err);
     } catch (finalErr) {
-      return await retryAfterRegistry(finalErr);
+      throw rewritePnpmError(finalErr);
     }
   }
 }
 
-/** 官方源：镜像同步延迟时的兜底目标 */
-export const OFFICIAL_REGISTRY = 'https://registry.npmjs.org';
+/** 官方源：镜像同步延迟时的兜底目标（实现见 registry.ts，这里转出给旧调用方） */
+export { OFFICIAL_REGISTRY };
 
 /**
  * 判定"镜像还没同步到这个版本"。

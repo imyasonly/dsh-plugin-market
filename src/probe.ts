@@ -11,6 +11,7 @@
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { fetchJson } from './http.js';
+import { readEffectiveRegistry } from './registry.js';
 import type { BaitongConfig } from './config-store.js';
 
 export interface ProbeEvent {
@@ -70,7 +71,9 @@ export async function handleProbe(req: IncomingMessage, res: ServerResponse, cfg
       /* 客户端断开 */
     }
   };
-  const registryBase = cfg.npmRegistry?.trim() || 'https://registry.npmjs.org';
+  // 探测的必须是**安装时真正会去问**的那个源：设置页留空时跟随本机 npm 配置，
+  // 不是凭空假设官方源（否则镜像挂了你这边还显示绿色）。
+  const registryBase = cfg.npmRegistry?.trim() || readEffectiveRegistry();
   const timeout = Math.min(cfg.timeoutMs, 8000);
   const targets: [ProbeEvent['key'], string][] = [
     ['npm', `${registryBase.replace(/\/+$/, '')}/@baitongserver/dsh-plugin-market/latest`],

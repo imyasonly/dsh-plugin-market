@@ -27,7 +27,7 @@ export const Config = Schema.object({
   timeoutMs: Schema.number().default(20000).description('上游请求超时（毫秒）'),
   userAgent: Schema.string().default('Mozilla/5.0 (compatible; baitong-market/0.1)').description('请求 UA'),
   maxResults: Schema.number().default(12).description('搜索结果上限'),
-  npmRegistry: Schema.string().description('npm 镜像源（留空跟随本机 npm 配置）'),
+  npmRegistry: Schema.string().description('安装源（留空 = 自动：跟随本机 npm 配置，目标版本缺失时回退官方源）'),
   checkUpdatesOnStart: Schema.boolean().default(true).description('启动时检查插件更新'),
 });
 

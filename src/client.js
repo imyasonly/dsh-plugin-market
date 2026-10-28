@@ -193,6 +193,7 @@ const EN = {
   '更多日志': 'More logs',
   '接口地址、技能目录与请求参数': 'API base, skills directory, and request parameters',
   '启动检查更新与 npm 镜像源': 'Update checks on start and npm registry',
+  '安装源与更新策略：检查固定官方源优先，安装按这里配置的源（缺版本时自动回退官方源）': 'Install source and update policy: checks prefer the official registry, installs use the source configured here (falling back to the official registry when a version is missing)',
   '医药': 'Pharma',
   '大健康': 'Wellness',
   '常规': 'General',
@@ -226,6 +227,12 @@ const EN = {
   '清空筛选': 'Clear filters',
   '最近 {n} 次操作记录': 'Last {n} operations',
   'npm 镜像源': 'npm registry',
+  '安装源': 'Install source',
+  '实际生效的安装源（设置留空时来自本机 npm 配置）': 'Effective install source (from local npm config when the setting is empty)',
+  '检查更新固定官方源优先（镜像同步滞后时会漏掉刚发布的新版）；安装走这里的源，目标版本在该源缺失时自动换到官方源，不再报 ERR_PNPM_NO_MATCHING_VERSION。': 'Update checks always prefer the official registry (a lagging mirror would hide freshly published versions). Installs use the source set here and switch to the official registry when the target version is missing there, instead of failing with ERR_PNPM_NO_MATCHING_VERSION.',
+  '实际生效的安装源': 'Effective install source',
+  '（跟随本机 npm）': ' (following local npm)',
+  '自动（跟随本机 npm，缺版本时回退官方源）': 'Automatic (follow local npm, fall back to the official registry when a version is missing)',
   '启动时检查更新': 'Check for updates on start',
   '未配置（跟随本机 npm）': 'Not set (follow local npm)',
   'npm 官方源': 'npm official',
@@ -3413,19 +3420,20 @@ function SettingsCard(props) {
       {form ? (
         <div className="btm-set-form">
           <label>
-            <span>{tr('npm 镜像源')}</span>
+            <span>{tr('安装源')}</span>
             <select
               className="btm-input"
               value={form.npmRegistry}
               onChange={(e) => setForm({ ...form, npmRegistry: e.target.value })}
             >
-              <option value="">{tr('未配置（跟随本机 npm）')}</option>
+              <option value="">{tr('自动（跟随本机 npm，缺版本时回退官方源）')}</option>
               <option value="https://registry.npmjs.org">{tr('npm 官方源')}</option>
               <option value="https://registry.npmmirror.com">{tr('npmmirror（淘宝）')}</option>
               <option value="https://mirrors.cloud.tencent.com/npm/">{tr('腾讯云镜像')}</option>
               <option value="https://mirrors.tuna.tsinghua.edu.cn/npm/">{tr('清华 TUNA 镜像')}</option>
             </select>
           </label>
+          <p className="btm-status">{tr('检查更新固定官方源优先（镜像同步滞后时会漏掉刚发布的新版）；安装走这里的源，目标版本在该源缺失时自动换到官方源，不再报 ERR_PNPM_NO_MATCHING_VERSION。')}</p>
           <label className="btm-set-toggle">
             <span>{tr('启动时检查更新')}</span>
             <input
@@ -3646,6 +3654,7 @@ function SettingsCard(props) {
                     注意 diag.apiBase 仍然由后端返回，「复制诊断信息」里也仍然带着它——
                     排查时更需要完整快照，只是不再占用诊断页的一行。 */}
                 {diag.npmRegistry ? <li><span>{tr('npm 镜像源')}</span><b>{diag.npmRegistry}</b></li> : null}
+                {diag.effectiveRegistry ? <li><span>{tr('实际生效的安装源')}</span><b>{diag.effectiveRegistry}</b></li> : null}
                 {diag.proxy && Object.keys(diag.proxy).length ? (
                   <li><span>{tr('代理环境')}</span><b>{JSON.stringify(diag.proxy)}</b></li>
                 ) : null}

@@ -13,6 +13,7 @@ import { fetchOpts } from './skill-market.js';
 import { addDshPlugin, currentProfile, isSafeProfile, profileDir, removeDshPlugin } from './dsh-cli.js';
 import { dshHome } from './config-store.js';
 import { fetchBytes, fetchJson, HttpError } from './http.js';
+import { chooseInstallRegistry, missingVersionMessage, readEffectiveRegistry, registrySpecOf } from './registry.js';
 import type { BaitongConfig } from './config-store.js';
 
 /** 插件一级类目（key 与百通后管字典一致，共 7 类） */
@@ -379,12 +380,30 @@ export async function fetchLatestVersions(
   const targets = [...new Set(pkgs.map((p) => p.trim()).filter(Boolean))].slice(0, 60);
   const results: Record<string, string> = {};
   const queue = [...targets];
+  /**
+   * 检查源顺序：官方源 → 配置的安装源 → 本机 npm 配置 → npmmirror。
+   *
+   * 🔴 为什么官方源仍排第一：镜像对刚发布的版本有同步延迟，若先问镜像，
+   *    用户会**看不到**刚发布的新版（面板显示"已是最新"），比"看到但装不上"更糟。
+   *    检查说「有 2.2.4」而镜像还没有 2.2.4 的口径差，由安装前的
+   *    chooseInstallRegistry 兜住 —— 它会挑一个确实有该版本的源再装（见 registry.ts）。
+   *    私有源场景由第 2、3 位兜底：公共源没有该包时会继续往下问。
+   */
+  const bases: string[] = [];
+  const pushBase = (url: string) => {
+    const base = url.trim().replace(/\/+$/, '');
+    if (/^https?:\/\//i.test(base) && !bases.includes(base)) bases.push(base);
+  };
+  pushBase('https://registry.npmjs.org');
+  pushBase(cfg.npmRegistry);
+  pushBase(readEffectiveRegistry());
+  pushBase('https://registry.npmmirror.com');
   const worker = async () => {
     for (;;) {
       const pkg = queue.shift();
       if (pkg === undefined) return;
       if (!REGISTRY_RE.test(pkg)) continue;
-      for (const base of ['https://registry.npmjs.org', 'https://registry.npmmirror.com']) {
+      for (const base of bases) {
         try {
           const json = await fetchJson<{ version?: unknown }>(
             `${base}/${encodeURIComponent(pkg).replace(/%40/gi, '@').replace(/%2f/gi, '/')}/latest`,
@@ -563,7 +582,12 @@ export async function installBaitongPlugin(
   if (conflict) {
     throw new Error(`插件加载 id「${conflict.id}」与已安装的 ${conflict.holder} 冲突，继续安装会让 DSH 无法启动，已拒绝。请先卸载 ${conflict.holder}。`);
   }
-  const log = await addDshPlugin(source, profile);
+  // 安装源预检：registry 形态的 spec 先确认「目标版本在哪个源上真的存在」，
+  // 避免镜像同步延迟让安装/更新直接失败（详见 registry.ts 的事故说明）。
+  const target = registrySpecOf(source);
+  const choice = target ? await chooseInstallRegistry(target.pkg, target.version, cfg, profileDir(profile)) : null;
+  if (choice?.missing) throw new Error(missingVersionMessage(target!.pkg, target!.version, choice.registry));
+  const log = await addDshPlugin(source, profile, choice?.registry);
   return {
     fullName: ref.fullName,
     source,

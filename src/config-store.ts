@@ -12,7 +12,10 @@ export interface BaitongConfig {
   timeoutMs: number;
   userAgent: string;
   maxResults: number;
-  /** npm 镜像源（空 = 跟随本机 npm 配置） */
+  /**
+   * 安装源（空 = 自动：跟随本机 npm 配置，目标版本在该源缺失时回退官方源）。
+   * 字段名保留 npmRegistry 以免破坏已存的 overlay 文件。
+   */
   npmRegistry: string;
   /** 启动时检查插件更新（面板版本徽标的轮询开关） */
   checkUpdatesOnStart: boolean;
