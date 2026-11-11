@@ -369,6 +369,16 @@ export async function installedSlugs(skillsDir: string): Promise<Set<string>> {
  * 兼容单行引号写法与 YAML 块标量（`>` / `|`：多行简介基本都用块标量），
  * 取不到就返回空串，让前端走「暂无简介」兜底。
  */
+function parseSkillFrontmatterName(md: string): string {
+  const raw = String(md || '').replace(/\r\n?/g, '\n');
+  if (!raw.startsWith('---')) return '';
+  const end = raw.indexOf('\n---', 3);
+  const fm = end < 0 ? raw.slice(3) : raw.slice(3, end);
+  const line = fm.split('\n').find((l) => /^name\s*:/i.test(l));
+  if (!line) return '';
+  return line.replace(/^name\s*:/i, '').trim().replace(/^(["'])([\s\S]*)\1$/, '$2').trim();
+}
+
 function parseSkillFrontmatterDescription(md: string): string {
   const raw = String(md || '').replace(/\r\n?/g, '\n');
   if (!raw.startsWith('---')) return '';
@@ -428,21 +438,19 @@ export async function listInstalledSkills(skillsDir: string): Promise<Record<str
         summary = String(meta.summary || meta.description || '').trim();
         metaTime = meta.publishedAt ? new Date(Number(meta.publishedAt) || meta.publishedAt).toISOString() : null;
       } catch { /* 无 _meta.json */ }
-      // _meta.json 没有名字时退回 SKILL.md frontmatter 的 name: 行（手工安装的技能只有这一处有名字）
-      if (!skillName) {
-        try {
-          const head = readFileSync(join(dir, 'SKILL.md'), 'utf8').slice(0, 4096);
-          const m = /^name:\s*(.+)$/m.exec(head);
-          if (m) skillName = m[1].trim().replace(/^(["'])(.*)\1$/, '$2');
-        } catch { /* SKILL.md 上面已校验存在，读失败忽略 */ }
-      }
-      // 简介：_meta.json 没有就退回 SKILL.md frontmatter 的 description:
+      // SKILL.md 头只读一次：frontmatter 的 name 是**技能调用名**（输入框里 /name 用的就是它），
+      // description 是卡片简介。_meta.json 的 name 是展示名，两者经常不一致
+      //（实例：展示名「医学专业图示生成」，调用名 medical-diagram）。
+      let skillMdHead = '';
+      try {
+        skillMdHead = readFileSync(join(dir, 'SKILL.md'), 'utf8').slice(0, 8192);
+      } catch { /* SKILL.md 上面已校验存在，读失败忽略 */ }
+      const invokeName = parseSkillFrontmatterName(skillMdHead);
+      // _meta.json 没有名字时退回 frontmatter（手工安装的技能只有这一处有名字）
+      if (!skillName) skillName = invokeName;
+      // 简介：_meta.json 没有就退回 frontmatter 的 description:
       // （已安装卡片要和「全部」tab 一样展示简介，之前这里没给字段，卡片下方永远是空的）
-      if (!summary) {
-        try {
-          summary = parseSkillFrontmatterDescription(readFileSync(join(dir, 'SKILL.md'), 'utf8').slice(0, 8192));
-        } catch { /* 读失败就用空串，前端显示「暂无简介」 */ }
-      }
+      if (!summary) summary = parseSkillFrontmatterDescription(skillMdHead);
       try {
         for (const f of readdirSync(dir)) {
           files += 1;
@@ -452,6 +460,7 @@ export async function listInstalledSkills(skillsDir: string): Promise<Record<str
       items.push({
         slug: name,
         name: skillName || name, // 真实技能名；实在读不到再回退目录名
+        invokeName: invokeName || name, // 输入框 /name 用的调用名（≠ 展示名）
         summary,
         version,
         files,

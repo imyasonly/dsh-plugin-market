@@ -16,6 +16,12 @@ window.__ModuleLoader__.load({
   id: '@baitongserver/dsh-plugin-market',
   factory: (require) => {
     const React = require('react');
+    // 构建标记：控制台看到这行说明跑的是哪个版本（排查“改了没生效”用）
+    try {
+      console.info('[baitong-market] client loaded v0.2.0');
+    } catch {
+      /* 控制台不可用 */
+    }
 
     // 面板通过 portal 挂到 document.body：脱离侧栏容器的 overflow 裁剪
     const fallbackPortal = (node) => node;
@@ -83,6 +89,15 @@ const EN = {
   '暂无技能': 'No skills',
   '还没有已安装的插件': 'No plugins installed yet',
   '还没有已安装的技能': 'No skills installed yet',
+  '去试试': 'Try it',
+  '已新建会话并填好技能引用，请在左侧会话列表打开':
+    'New conversation created with the skill reference — open it from the sidebar',
+  '在新会话中引用该技能': 'Reference this skill in a new conversation',
+  '当前策略不允许新建会话': 'Starting a new conversation is disabled by policy',
+  '已在新会话中引用该技能，补充需求后发送': 'Skill referenced in a new conversation — add your request and send',
+  '已复制技能调用词，粘贴到输入框即可': 'Skill command copied — paste it into the composer',
+  '已新建会话，请手动输入 /{name}': 'New conversation opened — type /{name} manually',
+  '无法新建会话，请手动新建后输入 /{name}': 'Could not start a conversation — create one and type /{name}',
   '没有匹配「{q}」的已安装项': 'No installed item matches "{q}"',
   '安装次数': 'Installs',
   '下载次数': 'Downloads',
@@ -725,11 +740,13 @@ function PluginCard({ plugin, categories, installing, onInstall }) {
 
 /* ============================ 技能卡片 ============================ */
 
-function SkillCard({ skill, onInstall, onDetail, installedSlugsSet = new Set() }) {
+function SkillCard({ skill, onInstall, onDetail, installedSlugsSet = new Set(), onTry, invokeName }) {
   const tr = useTr();
   // 服务端搜索接口本身会带 installed（按本机技能目录算），和本地清单双保险：
   // 任一为真就显示「已安装」，避免本地清单还没拉回来时短暂闪回「安装」
   const installed = !!skill.installed || installedSlugsSet.has(skill.slug);
+  // 调用名来自本地已安装清单（搜索接口只有 slug）：拿不到就退回 slug
+  const tryName = String(invokeName || skill.invokeName || skill.slug || '').trim();
   return (
     <div className={'btm-card' + (installed ? ' is-installed' : '')}>
       <div className="btm-card-head">
@@ -754,9 +771,22 @@ function SkillCard({ skill, onInstall, onDetail, installedSlugsSet = new Set() }
           {tr('详情')}
         </button>
         {installed ? (
-          <button type="button" className="btm-btn done" disabled>
-            {tr('已安装')}
-          </button>
+          <>
+            {/* 已安装的技能才有「去试试」：新建会话并预填引用词 */}
+            {onTry ? (
+              <button
+                type="button"
+                className="btm-btn primary"
+                disabled={!tryName}
+                onClick={() => onTry(skill, tryName)}
+              >
+                {tr('去试试')}
+              </button>
+            ) : null}
+            <button type="button" className="btm-btn done" disabled>
+              {tr('已安装')}
+            </button>
+          </>
         ) : (
           <button type="button" className="btm-btn primary" onClick={() => onInstall(skill)}>
             {tr('安装')}
@@ -965,6 +995,12 @@ const CSS = `
 .btm-installed .btm-card-actions .btm-btn{min-height:26px;padding:0 9px;font-size:11px}
 .btm-installed .btm-card-actions .btm-btn.btm-btn-icon{min-height:26px;width:26px}
 .btm-installed .btm-card-actions .btm-card-details{flex:1 1 auto}
+/* 已安装卡片：靠统一内容高度来拉齐，不用 height:100%（会和 grid 行高打架，卡片会压到下一行）：
+   描述固定两行高、元信息只占一行；整体再垫高一点，留出呼吸感 */
+.btm-installed .btm-card{padding:16px}
+.btm-installed .btm-card-desc{min-height:40px;margin-top:12px}
+.btm-installed .btm-card-meta{flex-wrap:nowrap;overflow:hidden;height:22px;margin-top:10px}
+.btm-installed .btm-card-actions{margin-top:12px;padding-top:12px}
 .btm-tabs{display:flex;gap:4px}
 .btm-tab{padding:4px 10px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2,#e5e7eb);background:var(--dsw-alias-bg-layer-2,#f8fafc);color:var(--dsw-alias-label-secondary,inherit);font:inherit;font-size:12px;cursor:pointer}
 .btm-tab.active{color:var(--dsw-alias-state-success-primary,#047857);border-color:var(--dsw-alias-state-success-primary,#047857);background:var(--dsw-alias-state-success-tertiary,#ecfdf5)}
@@ -998,7 +1034,10 @@ const CSS = `
 .btm-card-stats{display:flex;gap:10px;flex:none;font-size:11px;color:var(--dsw-alias-label-tertiary,#7b8088);font-variant-numeric:tabular-nums}
 .btm-card-stats>span{flex:none;white-space:nowrap}
 /* 操作区独立成行 + 上分割线：详情在左（文字链接，非按钮），安装/状态在右 */
-.btm-card-actions{display:flex;align-items:center;gap:8px;flex:none;margin-top:10px;padding-top:10px;border-top:1px solid var(--dsw-alias-border-l2,#e2e4e8)}
+.btm-card-actions{display:flex;align-items:center;gap:8px;flex:none;flex-wrap:nowrap;margin-top:10px;padding-top:10px;border-top:1px solid var(--dsw-alias-border-l2,#e2e4e8)}
+/* 「详情 + 去试试 + 已安装」三个按钮要在 232px 的卡片里放得下：按钮收窄、不换行 */
+.btm-card-actions .btm-btn{flex:none;min-height:26px;padding:0 9px;font-size:11px;white-space:nowrap}
+.btm-card-actions .btm-card-details{min-width:0}
 .btm-card-details{flex:1 1 64px;min-width:64px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:0;padding:0;border:0;background:transparent;color:var(--dsw-alias-label-secondary,#4b5058);font:inherit;font-size:12px;font-weight:500;line-height:18px;text-align:left;text-decoration:none;cursor:pointer}
 .btm-card-details:hover{color:var(--dsw-alias-state-business-primary,#4d6bfe);text-decoration:underline}
 .btm-btn{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;min-height:30px;padding:0 12px;border-radius:8px;border:1px solid var(--dsw-alias-accent,#475569);background:var(--dsw-alias-accent,#475569);color:#fff;font:inherit;font-size:12px;cursor:pointer}
@@ -1750,18 +1789,305 @@ function PluginDetail({ item, onClose }) {
   );
 }
 
+/* ============================ 「去试试」：新会话里引用技能 ============================ */
+
+/**
+ * 找侧栏/标题栏的「新对话」按钮（可能有好几个，都返回）。
+ * 文案取自 DSH sidebar 包的 locale：zh「新建会话」/ en「New session」/ ja「新規セッション」。
+ * DSH 没有给插件"切换会话"的接口（主视图只认自己 retain 的会话，session/create 也切不过去），
+ * 所以唯一可靠入口就是这些真实按钮：点下去由宿主自己完成"新建 + 切换"。
+ */
+function findNewSessionButtons() {
+  try {
+    const exact = ['新建会话', 'New session', 'New Session', '新規セッション'];
+    const fuzzy = ['新建对话', '新对话', '开启新会话', 'New conversation', 'New chat'];
+    const visible = (node) => {
+      try {
+        return !node.disabled && node.getClientRects().length > 0;
+      } catch {
+        return false;
+      }
+    };
+    const score = (node) => {
+      if (node.hasAttribute('data-sidebar-opener')) return 0; // 那是侧栏开关
+      if (!visible(node)) return 0;
+      const label = String(node.getAttribute('aria-label') || '').trim();
+      if (!label) return 0;
+      if (exact.includes(label)) return 2;
+      if (fuzzy.some((text) => label.includes(text))) return 1;
+      return 0;
+    };
+    const list = Array.from(document.querySelectorAll('button[aria-label]')).filter(score);
+    // 带 aria-keyshortcuts 的是主按钮，优先
+    list.sort(
+      (a, b) => (b.hasAttribute('aria-keyshortcuts') ? 1 : 0) - (a.hasAttribute('aria-keyshortcuts') ? 1 : 0),
+    );
+    return list;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * 等新会话的输入框出现。切换会话时 DSH 会卸载旧输入框、挂载一个新的
+ * （SessionInputShell 每个会话一个 Lexical 实例），所以
+ * 「contenteditable 元素换了、而且是空的」就是已经切到新会话了。
+ * 额外要求元素连续两轮轮询都稳定：既过滤切换过程中的临时节点，
+ * 也给 Lexical 留出挂载时间（元素先上 DOM、Lexical 异步才接管）。
+ */
+async function waitForFreshEditor(beforeEditor, timeoutMs) {
+  const startedAt = Date.now();
+  let candidate = null;
+  while (Date.now() - startedAt < timeoutMs) {
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    const editor = document.querySelector('[contenteditable="true"]');
+    if (editor && editor !== beforeEditor && !String(editor.textContent || '').trim()) {
+      if (candidate === editor) return editor;
+      candidate = editor;
+    } else {
+      candidate = null;
+    }
+  }
+  return null;
+}
+
+/**
+ * 把文本打进输入框。Lexical 的挂载和渲染提交都是异步的，之前同步检查 + 直接改 DOM
+ * 会跟它打架：要么被重置成空（空白会话上发生），要么被叠成两份（历史会话上发生）。所以：
+ * - 幂等：已经包含这段文字就直接成功，绝不重复插；
+ * - 只用 execCommand（Lexical 当作用户输入处理），**绝不直接改 DOM**；
+ * - 插完等 250ms 再验证，没生效且输入框仍为空就重试（最多 3 轮）。
+ */
+async function insertTextIntoEditor(editor, text) {
+  if (String(editor.textContent || '').includes(text)) return true;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      editor.focus();
+      document.execCommand('insertText', false, text);
+    } catch {
+      /* 下一轮再试 */
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    const content = String(editor.textContent || '');
+    if (content.includes(text)) return true;
+    if (content.trim()) return false; // 出现了别的内容，不再碰它
+  }
+  return String(editor.textContent || '').includes(text);
+}
+
+/**
+ * 关闭广场面板：按顺序执行，每一步都记日志。
+ * ① 属性链上的 onClose → ② 点右上角的 × → ③ 派发 Esc → ④ 面板还在页面上就立即隐藏。
+ * ④ 不等待、不依赖任何 React 状态：只要 .btm-page 还挂在 DOM 里，用户就再也看不见它
+ *   （open 状态保持 true，下次点侧栏入口按钮会先走 toggle 的 close() 干净卸载，自愈）。
+ */
+function closePlazaPanel(closePanel) {
+  const steps = [];
+  // ① 属性链上的 onClose
+  try {
+    if (typeof closePanel === 'function') {
+      closePanel();
+      steps.push('onClose:ok');
+    } else {
+      steps.push('onClose:missing');
+    }
+  } catch {
+    steps.push('onClose:throw');
+  }
+  // ② 直接点右上角的 ×
+  try {
+    const closeBtn = document.querySelector('.btm-close');
+    if (closeBtn) {
+      closeBtn.click();
+      steps.push('x:ok');
+    } else {
+      steps.push('x:missing');
+    }
+  } catch {
+    steps.push('x:throw');
+  }
+  // ③ 面板自己注册的 Esc 监听
+  try {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    steps.push('esc:sent');
+  } catch {
+    steps.push('esc:throw');
+  }
+  // ④ 立即隐藏：React 的卸载是异步 commit，此刻节点必然还在；藏掉之后无论 commit 与否用户都看不见
+  try {
+    const pages = document.querySelectorAll('.btm-page');
+    pages.forEach((page) => {
+      page.style.display = 'none';
+    });
+    steps.push('hide:' + pages.length);
+  } catch {
+    steps.push('hide:throw');
+  }
+  try {
+    console.info('[baitong-market] 关闭面板 →', steps.join(' | '));
+  } catch {
+    /* 控制台不可用 */
+  }
+}
+
+/**
+ * 当前会话是不是"空白新对话"（没开始过任何一轮）。
+ * DSH 判断当前会话的方式：列表快照里 retainedBy.mainView > 0 的那一行；
+ * 行上的 blank 字段就是空白标记。拿不到任何一环就返回 null（调用方按"未知"处理）。
+ */
+function currentSessionBlank(sessions) {
+  try {
+    const snap =
+      sessions && sessions.list && typeof sessions.list.getSnapshot === 'function'
+        ? sessions.list.getSnapshot()
+        : null;
+    const byId = snap && snap.byId;
+    if (!byId) return null;
+    const row = Object.values(byId).find(
+      (candidate) => ((candidate.retainedBy && candidate.retainedBy.mainView) ?? 0) > 0,
+    );
+    if (!row) return null;
+    return row.blank === true ? true : row.blank === false ? false : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A 链路断掉的原因 → 给用户看的中文说明 */
+const TRY_REASON_LABEL = {
+  'no new session button': '没找到「新建会话」按钮',
+  'no fresh composer': '界面没有切到新会话',
+  'insert rejected': '输入框写入失败',
+  'insert lost': '输入框内容没有留住',
+};
+
+/**
+ * 「去试试」主流程，A → C 降级：
+ *   A 点真实的「新建会话」按钮（宿主自己完成新建+切换）→ 等新输入框挂载 → 打入 /调用名 + 引导语
+ *   C 复制同一段调用词，用户自己粘贴
+ * 之前试过 session/create + 写草稿存储：会话能建、草稿能写（id 一致、42 字），
+ * 但 DSH 不让插件切视图，用户什么都看不到；所以改成驱动真实按钮。
+ */
+async function startSkillTry(ctx, item, tr, notify, closePanel) {
+  const invoke = String(item.invokeName || item.key || '').trim();
+  if (!invoke) return;
+  const text = '/' + invoke + ' 请按该技能的流程帮我处理：';
+  let failReason = '';
+  let clickedLabel = '';
+
+  // ---- A：按顺序执行：关闭广场 → 新建会话 → 填入文字 ----
+  const startedAt = Date.now();
+  try {
+    const beforeEditor =
+      typeof document !== 'undefined' ? document.querySelector('[contenteditable="true"]') : null;
+    // ① 先关广场（用户点完「去试试」，广场就该消失）
+    closePlazaPanel(closePanel);
+    // ② 定位目标输入框
+    let editor = null;
+    const blank = currentSessionBlank(ctx && ctx.sessions);
+    if (blank === true && beforeEditor && !String(beforeEditor.textContent || '').trim()) {
+      // 当前会话本来就是空白新对话：直接复用，连「新建会话」都不点。
+      // 点它反而会触发 空白→空白 的切换：React 复用同一个输入框节点、Lexical 重绑定，
+      // 已插入的内容会被重置，怎么插都留不住；不点就没这些竞态。
+      editor = beforeEditor;
+    } else {
+    const buttons = findNewSessionButtons();
+    if (!buttons.length) throw new Error('no new session button');
+    clickedLabel = String(buttons[0].getAttribute('aria-label') || '');
+    buttons[0].click();
+    editor = await waitForFreshEditor(beforeEditor, 1000);
+    if (!editor) {
+      const current = document.querySelector('[contenteditable="true"]');
+      const sameEmpty =
+        current && current === beforeEditor && !String(current.textContent || '').trim();
+      if (sameEmpty) {
+        // 没等到新元素、当前输入框还是原来那个空框：宿主原地复用了当前空白会话
+        //（空白→空白 的切换，React 会复用同一个 contenteditable 节点，等再久也不会出现"新元素"）。
+        // 再给迟到的导航留 500ms，仍没有就把文案写进当前输入框——正好是「复用空白会话」。
+        editor = await waitForFreshEditor(beforeEditor, 500);
+        if (!editor) editor = current;
+      } else if (buttons.length > 1) {
+        // 当前输入框不是空框却也没切过去：换个「新建会话」按钮再试一次
+        clickedLabel = String(buttons[1].getAttribute('aria-label') || '');
+        buttons[1].click();
+        editor = await waitForFreshEditor(beforeEditor, 1000);
+      }
+    }
+    }
+    if (!editor) throw new Error('no fresh composer');
+    // ③ 填入 /技能名 + 引导语
+    if (!(await insertTextIntoEditor(editor, text))) throw new Error('insert rejected');
+    // ④ 事后复查：只盯住目标元素本身（它可能被迟到的 Lexical 接管重置）。
+    //    🔴 绝不碰"当前第一个 contenteditable"——用户点开别的会话时，那样会把文案喷进历史对话。
+    //    目标元素一旦被卸载（发生了切换）就立即停手。
+    for (let round = 0; round < 2; round += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      if (!editor.isConnected) break;
+      const content = String(editor.textContent || '');
+      if (content.includes(text)) break;
+      if (!content.trim()) await insertTextIntoEditor(editor, text);
+    }
+    if (!editor.isConnected || !String(editor.textContent || '').includes(text)) {
+      throw new Error('insert lost');
+    }
+    try {
+      console.info('[baitong-market] 去试试完成', {
+        clickedLabel,
+        blank,
+        ms: Date.now() - startedAt,
+      });
+    } catch {
+      /* 控制台不可用 */
+    }
+    notify(tr('已在新会话中引用该技能，补充需求后发送'));
+    return;
+  } catch (error) {
+    failReason = (error && error.message) || 'unknown';
+    try {
+      console.warn('[baitong-market] 去试试 A 失败：', failReason, { clickedLabel, error });
+    } catch {
+      /* 控制台不可用 */
+    }
+  }
+
+  // ---- C ----
+  try {
+    await navigator.clipboard.writeText(text);
+    const why = failReason ? TRY_REASON_LABEL[failReason] || failReason : '';
+    notify(tr('已复制技能调用词，粘贴到输入框即可') + (why ? '（' + why + '）' : ''));
+    return;
+  } catch {
+    /* 剪贴板不可用 */
+  }
+
+  // ---- D ----
+  notify(tr('无法新建会话，请手动新建后输入 /{name}', { name: invoke }));
+}
+
 /**
  * 「已安装」独立视图：直接读本机已装清单（跨 profile 按包名合并），
  * 不复用市场搜索结果 —— 已装的插件可能已下架/改名，市场里搜不到。
  * 插件卡片展开可看 README；两者都支持卸载。
  */
-function InstalledView({ kind, keyword = '', installStatus, onChanged, onNeedRestart }) {
+function InstalledView({ kind, keyword = '', installStatus, onChanged, onNeedRestart, ctx, closePanel }) {
   const tr = useTr();
   const [state, setState] = useState({ status: 'loading', items: [] });
   const [detail, setDetail] = useState(null); // 当前打开详情的条目
   const [busyKey, setBusyKey] = useState(null); // 卸载/更新中
   const [uninstallErr, setUninstallErr] = useState('');
   useAutoClearError(uninstallErr, setUninstallErr);
+  const [note, setNote] = useState(''); // 「去试试」的轻提示（复制成功/已新建会话）
+  useAutoClearError(note, setNote);
+  // 「去试试」会新建会话：宿主策略不让建就置灰（拿不到判定接口时按允许处理）
+  const canStartSession = (() => {
+    try {
+      const remoteAccess = ctx && ctx.remoteAccess;
+      if (!remoteAccess || typeof remoteAccess.allows !== 'function') return true;
+      return remoteAccess.allows('session/create') !== false;
+    } catch {
+      return true;
+    }
+  })();
   const [latestMap, setLatestMap] = useState(() => new Map()); // pkg -> { latest, hasUpdate }
   const wasActiveRef = useRef(false);
   // 回调放 ref：父组件传的是内联箭头函数，写进 useCallback 依赖会让 load 每渲染都变 → 无限循环
@@ -1788,6 +2114,8 @@ function InstalledView({ kind, keyword = '', installStatus, onChanged, onNeedRes
             version: it.version || '',
             // 已安装技能卡片要和「全部」tab 一样在名称下方展示简介
             description: it.summary || it.description || '',
+            // 输入框里 /name 用的是 frontmatter 的调用名，不是展示名
+            invokeName: it.invokeName || it.name || it.slug,
             extra: it.slug,
             files: it.files,
             bytes: it.bytes,
@@ -1908,6 +2236,11 @@ function InstalledView({ kind, keyword = '', installStatus, onChanged, onNeedRes
   return (
     <div className="btm-installed">
       {uninstallErr ? <div className="btm-error">{uninstallErr}</div> : null}
+      {note ? (
+        <div className="btm-banner">
+          <span>{note}</span>
+        </div>
+      ) : null}
       {!items.length ? <p className="btm-status">{tr('没有匹配「{q}」的已安装项', { q: keyword })}</p> : null}
       <div className="btm-grid">
         {items.map((it) => (
@@ -1972,6 +2305,19 @@ function InstalledView({ kind, keyword = '', installStatus, onChanged, onNeedRes
               <button type="button" className="btm-card-details" onClick={() => setDetail(it)}>
                 {kind === 'skills' ? tr('技能详情') : tr('插件说明')}
               </button>
+              {kind === 'skills' ? (
+                <button
+                  type="button"
+                  className="btm-btn primary"
+                  disabled={!it.invokeName || !canStartSession}
+                  title={
+                    !canStartSession ? tr('当前策略不允许新建会话') : tr('在新会话中引用该技能')
+                  }
+                  onClick={() => startSkillTry(ctx, it, tr, setNote, closePanel)}
+                >
+                  {tr('去试试')}
+                </button>
+              ) : null}
               {kind !== 'skills' ? (
                 <button
                   type="button"
@@ -2056,7 +2402,7 @@ function ScopeSeg({ scope, onChange, count }) {
   );
 }
 
-function MarketPanel({ ctx }) {
+function MarketPanel({ ctx, onClosePanel }) {
   const [tab, setTab] = useState('plugins'); // plugins | skills
   const [keyword, setKeyword] = useState('');
   const [categories, setCategories] = useState([]);
@@ -2077,6 +2423,9 @@ function MarketPanel({ ctx }) {
   const [plugins, setPlugins] = useState([]);
   const [skills, setSkills] = useState([]);
   const [installedSlugs, setInstalledSlugs] = useState(() => new Set()); // 已安装技能 slug 集合
+  const [installedInvoke, setInstalledInvoke] = useState(() => new Map()); // slug → 技能调用名
+  const [tryNote, setTryNote] = useState(''); // 「去试试」的轻提示（全部 tab）
+  useAutoClearError(tryNote, setTryNote);
   // 计数按 tab 分开：插件/技能数量不同，共用一个 state 会让两个 tab 显示同一个数
   const [installedPluginCount, setInstalledPluginCount] = useState(null);
   const [installedSkillCount, setInstalledSkillCount] = useState(null);
@@ -2182,6 +2531,15 @@ function MarketPanel({ ctx }) {
     const items = data.items || [];
     setInstalledSkillCount(items.length);
     setInstalledSlugs(new Set(items.map((it) => String(it.slug || '')).filter(Boolean)));
+    // 搜索接口只回 slug，而输入框里 /name 用的是 SKILL.md 的调用名（常与 slug 不同），
+    // 所以这里顺手建一张 slug → 调用名 的表，给「全部」tab 的「去试试」用
+    setInstalledInvoke(
+      new Map(
+        items
+          .map((it) => [String(it.slug || ''), String(it.invokeName || '')])
+          .filter(([slug, name]) => slug && name),
+      ),
+    );
   }, []);
 
   useEffect(() => {
@@ -2471,6 +2829,12 @@ function MarketPanel({ ctx }) {
 
       {/* 错误提示 */}
       {error && <div className="btm-error">{error}</div>}
+      {/* 「去试试」结果提示（全部 tab） */}
+      {tryNote ? (
+        <div className="btm-banner">
+          <span>{tryNote}</span>
+        </div>
+      ) : null}
 
       {/* 卡片网格：已安装走独立视图（读本机清单，不依赖市场搜索结果） */}
       {scope === 'installed' ? (
@@ -2480,6 +2844,8 @@ function MarketPanel({ ctx }) {
           installStatus={status}
           onChanged={(n) => (tab === 'skills' ? setInstalledSkillCount(n) : setInstalledPluginCount(n))}
           onNeedRestart={() => setRestartHint(true)}
+          ctx={ctx}
+          closePanel={onClosePanel}
         />
       ) : loading ? (
         <div className="btm-loading">{t('加载中…')}</div>
@@ -2517,6 +2883,10 @@ function MarketPanel({ ctx }) {
               onInstall={installSkill}
               onDetail={setSkillDetail}
               installedSlugsSet={installedSlugs}
+              invokeName={installedInvoke.get(s.slug)}
+              onTry={(sk, name) =>
+                startSkillTry(ctx, { ...sk, invokeName: name, key: sk.slug }, t, setTryNote, onClosePanel)
+              }
             />
           ))}
           {!skills.length && <div className="btm-empty">{t('暂无技能')}</div>}
@@ -4045,7 +4415,7 @@ function PlazaPage({ onClose, box, ctx }) {
       </div>
       <div className="btm-body">
         <PanelErrorBoundary>
-          <MarketPanel ctx={ctx} />
+          <MarketPanel ctx={ctx} onClosePanel={onClose} />
         </PanelErrorBoundary>
       </div>
     </div>
