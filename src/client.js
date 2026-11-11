@@ -727,7 +727,9 @@ function PluginCard({ plugin, categories, installing, onInstall }) {
 
 function SkillCard({ skill, onInstall, onDetail, installedSlugsSet = new Set() }) {
   const tr = useTr();
-  const installed = installedSlugsSet.has(skill.slug);
+  // 服务端搜索接口本身会带 installed（按本机技能目录算），和本地清单双保险：
+  // 任一为真就显示「已安装」，避免本地清单还没拉回来时短暂闪回「安装」
+  const installed = !!skill.installed || installedSlugsSet.has(skill.slug);
   return (
     <div className={'btm-card' + (installed ? ' is-installed' : '')}>
       <div className="btm-card-head">
@@ -1784,7 +1786,8 @@ function InstalledView({ kind, keyword = '', installStatus, onChanged, onNeedRes
             key: it.slug,
             name: it.name || it.slug,
             version: it.version || '',
-            description: '',
+            // 已安装技能卡片要和「全部」tab 一样在名称下方展示简介
+            description: it.summary || it.description || '',
             extra: it.slug,
             files: it.files,
             bytes: it.bytes,
@@ -1922,7 +1925,9 @@ function InstalledView({ kind, keyword = '', installStatus, onChanged, onNeedRes
                 <span className="btm-card-fullname">{it.extra}</span>
               </div>
             </div>
-            <p className="btm-card-desc">{it.description || (kind === 'skills' ? '' : tr('暂无描述'))}</p>
+            <p className="btm-card-desc">
+              {it.description || (kind === 'skills' ? tr('暂无简介') : tr('暂无描述'))}
+            </p>
 
             {/* 缓存/体积等 Meta 行 */}
             <div className="btm-card-meta">
@@ -2165,6 +2170,20 @@ function MarketPanel({ ctx }) {
     setLoadingMore(false);
   }, [keyword, skillCategory]);
 
+  /**
+   * 已安装技能清单：同时刷新「已安装」数量和 slug 集合。
+   * 数量给 ScopeSeg 的徽标；slug 集合决定「全部」tab 卡片的按钮是「安装」还是「已安装」。
+   * 🔴 之前只取了数量、没写 installedSlugs —— 于是已装的技能在「全部」tab 里
+   * 仍然显示「安装」，点了还会重复安装。
+   */
+  const refreshInstalledSkills = useCallback(async () => {
+    const [err, data] = await api('skillList');
+    if (err || !data) return;
+    const items = data.items || [];
+    setInstalledSkillCount(items.length);
+    setInstalledSlugs(new Set(items.map((it) => String(it.slug || '')).filter(Boolean)));
+  }, []);
+
   useEffect(() => {
     if (tab === 'plugins') loadPlugins();
     else loadSkills();
@@ -2181,15 +2200,12 @@ function MarketPanel({ ctx }) {
     };
   }, [scope]);
 
+  // 切 tab / 切范围都重新读一次：装完或卸完再回到「全部」时，按钮状态才不会是旧的
   useEffect(() => {
-    let live = true;
-    api('skillList').then(([err, data]) => {
-      if (live && !err && data) setInstalledSkillCount((data.items || []).length);
-    });
-    return () => {
-      live = false;
-    };
-  }, [scope]);
+    if (tab !== 'skills') return undefined;
+    refreshInstalledSkills();
+    return undefined;
+  }, [tab, scope, refreshInstalledSkills]);
 
 
   useEffect(() => {
@@ -2302,7 +2318,10 @@ function MarketPanel({ ctx }) {
     if (err) setError(t('安装失败：') + err);
     else {
       setRestartHint(true);
-      await loadSkills(); // 重新拉 skillList，「已安装」徽章即时生效
+      // 先把刚装的 slug 记进集合（卡片按钮立刻变「已安装」），再回读本机清单校正
+      setInstalledSlugs((prev) => new Set(prev).add(String(skill.slug)));
+      await loadSkills();
+      refreshInstalledSkills();
     }
   };
 

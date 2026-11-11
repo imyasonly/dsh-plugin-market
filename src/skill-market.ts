@@ -364,6 +364,40 @@ export async function installedSlugs(skillsDir: string): Promise<Set<string>> {
   return new Set(items.map((it) => String(it.slug)));
 }
 
+/**
+ * 从 SKILL.md 头部 frontmatter 里取 description（已安装卡片的简介）。
+ * 兼容单行引号写法与 YAML 块标量（`>` / `|`：多行简介基本都用块标量），
+ * 取不到就返回空串，让前端走「暂无简介」兜底。
+ */
+function parseSkillFrontmatterDescription(md: string): string {
+  const raw = String(md || '').replace(/\r\n?/g, '\n');
+  if (!raw.startsWith('---')) return '';
+  const end = raw.indexOf('\n---', 3);
+  const fm = end < 0 ? raw.slice(3) : raw.slice(3, end);
+  const lines = fm.split('\n');
+  const idx = lines.findIndex((line) => /^description\s*:/i.test(line));
+  if (idx < 0) return '';
+  const inline = lines[idx].replace(/^description\s*:/i, '').trim();
+  let value = inline;
+  const block = /^([>|])[+-]?$/.exec(inline);
+  if (block) {
+    const parts: string[] = [];
+    for (let i = idx + 1; i < lines.length; i += 1) {
+      const line = lines[i];
+      if (!line.trim()) {
+        parts.push('');
+        continue;
+      }
+      if (!/^\s/.test(line)) break;
+      parts.push(line.trim());
+    }
+    value = parts.join(block[1] === '|' ? '\n' : ' ').trim();
+  } else {
+    value = value.replace(/^(["'])([\s\S]*)\1$/, '$2').trim();
+  }
+  return value.replace(/\s+/g, ' ').trim().slice(0, 300);
+}
+
 export async function listInstalledSkills(skillsDir: string): Promise<Record<string, unknown>[]> {
   let names: string[] = [];
   try {
@@ -383,6 +417,7 @@ export async function listInstalledSkills(skillsDir: string): Promise<Record<str
       // 之前直接拿目录名当 name，已安装列表的主标题就变成了一串编码。
       let version = '';
       let skillName = '';
+      let summary = '';
       let metaTime: string | null = null;
       let files = 0;
       let bytes = 0;
@@ -390,6 +425,7 @@ export async function listInstalledSkills(skillsDir: string): Promise<Record<str
         const meta = JSON.parse(readFileSync(join(dir, '_meta.json'), 'utf8'));
         version = String(meta.version || '');
         skillName = String(meta.name || '').trim();
+        summary = String(meta.summary || meta.description || '').trim();
         metaTime = meta.publishedAt ? new Date(Number(meta.publishedAt) || meta.publishedAt).toISOString() : null;
       } catch { /* 无 _meta.json */ }
       // _meta.json 没有名字时退回 SKILL.md frontmatter 的 name: 行（手工安装的技能只有这一处有名字）
@@ -400,6 +436,13 @@ export async function listInstalledSkills(skillsDir: string): Promise<Record<str
           if (m) skillName = m[1].trim().replace(/^(["'])(.*)\1$/, '$2');
         } catch { /* SKILL.md 上面已校验存在，读失败忽略 */ }
       }
+      // 简介：_meta.json 没有就退回 SKILL.md frontmatter 的 description:
+      // （已安装卡片要和「全部」tab 一样展示简介，之前这里没给字段，卡片下方永远是空的）
+      if (!summary) {
+        try {
+          summary = parseSkillFrontmatterDescription(readFileSync(join(dir, 'SKILL.md'), 'utf8').slice(0, 8192));
+        } catch { /* 读失败就用空串，前端显示「暂无简介」 */ }
+      }
       try {
         for (const f of readdirSync(dir)) {
           files += 1;
@@ -409,6 +452,7 @@ export async function listInstalledSkills(skillsDir: string): Promise<Record<str
       items.push({
         slug: name,
         name: skillName || name, // 真实技能名；实在读不到再回退目录名
+        summary,
         version,
         files,
         bytes,
